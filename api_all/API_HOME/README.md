@@ -18,6 +18,25 @@ ONE_MENU.bat find resurrection --min 5
 
 On macOS/Linux, the equivalent is `python API_HOME/engine/menu.py ...`.
 
+## Inbox, priority, series and groups
+
+Set `inbox` in `config/paths.json`, then drop files in:
+
+```
+INBOX\00_PRIORITY\              runs first, whatever else is waiting
+INBOX\SERIES\God Is\01 ....md   a series: kept together, in file-number order, gets a series brief (station 48)
+INBOX\GROUPS\One Pages\...      a group: kept together, no order
+INBOX\...                        loose papers
+```
+
+`ONE_MENU.bat 47` makes a paper folder for each (or `47 --item D:\Some\Folder` to pull from a folder in place, with the same
+subfolder rules). Originals are never moved; the same file (by SHA-256) never gets a second folder. Paper folders land in
+`papers_root\SERIES\<name>\`, `papers_root\GROUPS\<name>\` or `papers_root\`. Point any station at a collection to run all of
+its papers: `ONE_MENU.bat 40 --item "<papers_root>\SERIES\God Is"`. With no `--item`, every paper runs, priority first and each
+series in order. For papers in a series or group, a station's result is also copied to `<collection>\_BY_STATION\<station>\`
+(the latest run per paper), so one station's output for the whole series sits in one folder. `ONE_MENU.bat 48` writes the
+series brief to `<collection>\_SERIES\<date>\`: its prompts are `stations\48_SERIES_BRIEF\PAPER_PROMPT.md` and `SERIES_PROMPT.md`.
+
 ## Portability and outputs
 
 All internal paths derive from `engine/paths.py`. Every external root is a named entry in `config/paths.json`; environment variable `ONE_MENU_<KEY>` can override one. Numbered adapters invoke legacy programs only through these roots. New paper runs write dated bundles under `<paper>/02_RUNS/NN_STATION/`, never overwriting an earlier run. Station 46 builds `03_REPORT/report.html` and `report.xlsx`.

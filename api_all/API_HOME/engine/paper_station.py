@@ -1,5 +1,5 @@
 from __future__ import annotations
-import argparse,html,json,re,time
+import argparse,html,json,re,shutil,time
 from concurrent.futures import ThreadPoolExecutor,as_completed
 from pathlib import Path
 from . import llm
@@ -29,7 +29,16 @@ def ai_bundle(paper:Path,label:str,prompts:list[tuple[str,str]],args):
    name,result,prompt=f.result(); gathered[name]=result.text if not result.error else {'error':result.error}; receipts.append(llm.receipt(result,source_hash=src_hash,prompt_version='1',focus_text=focus,focus_hash=focus_hash,part=name))
  out=dated_run_dir(paper,label); receipt={'source_hash':src_hash,'model':args.model,'provider':args.provider,'prompt_version':'1','focus_text':focus,'focus_hash':focus_hash,'tokens':sum(r['tokens'] for r in receipts),'time_seconds':sum(r['elapsed_seconds'] for r in receipts),'errors':[r['error'] for r in receipts if r['error']],'calls':receipts}
  body='<h1>'+html.escape(label)+'</h1>'+''.join(f'<section><h2>{html.escape(k)}</h2><pre>{html.escape(v if isinstance(v,str) else json.dumps(v,indent=2))}</pre></section>' for k,v in gathered.items()); write_bundle(out,label,gathered,'<!doctype html><meta charset="utf-8">'+body,receipt,[{'part':k,'result':v if isinstance(v,str) else json.dumps(v)} for k,v in gathered.items()])
+ mirror(paper,meta,label,out)
  meta.setdefault('stations_run',[]).append({'station':label,'run':str(out.relative_to(paper))}); (paper/'paper.json').write_text(json.dumps(meta,indent=2),encoding='utf-8'); print(out)
+
+def mirror(paper:Path,meta:dict,label:str,out:Path):
+ """A paper in a series or group also gets a copy of this station's result in <collection>/_BY_STATION/<label>/,
+ so every paper's output from one station sits together. The paper folder stays the master copy."""
+ if not (meta.get('series') or meta.get('group')): return
+ dest=paper.parent/'_BY_STATION'/label; dest.mkdir(parents=True,exist_ok=True)
+ for f in out.glob(label+'.*'):
+  if not f.name.endswith('.run.json'): shutil.copy2(f,dest/(paper.name+f.suffix))
 
 def run_ai(label,prompts):
  args=arguments(label); papers=[x for x in discover(args.items,args.limit) if x.is_dir()]
