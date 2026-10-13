@@ -28,7 +28,7 @@ def estimate(numbers,limit):
  return tokens,seconds
 def parse(argv=None):
  p=argparse.ArgumentParser(description='One front door for every API pipeline')
- p.add_argument('selection',nargs='*'); p.add_argument('--item',action='append',default=[],help='input item/path forwarded to each selected station'); p.add_argument('--turbo',nargs='?',const='high',choices=('low','normal','high')); p.add_argument('--workers',type=int); p.add_argument('--limit',type=int); p.add_argument('--provider'); p.add_argument('--model'); p.add_argument('--redo',action='store_true'); p.add_argument('--focus',default=''); p.add_argument('--yes',action='store_true'); p.add_argument('--dry-run',action='store_true'); p.add_argument('--min',dest='minimum',type=int,default=5); return p.parse_args(argv)
+ p.add_argument('selection',nargs='*'); p.add_argument('--item',action='append',default=[],help='input item/path forwarded to each selected station'); p.add_argument('--turbo',nargs='?',const='high',choices=('low','normal','high')); p.add_argument('--workers',type=int); p.add_argument('--limit',type=int); p.add_argument('--provider'); p.add_argument('--model'); p.add_argument('--redo',action='store_true'); p.add_argument('--focus',default=''); p.add_argument('--template',default='',help='output template: a name in templates/OUTPUT or a path to a .md'); p.add_argument('--yes',action='store_true'); p.add_argument('--dry-run',action='store_true'); p.add_argument('--min',dest='minimum',type=int,default=5); return p.parse_args(argv)
 def search(tag,minimum):
  from engine.tagger import find
  rows=find(tag,minimum)
@@ -53,14 +53,14 @@ def run(argv=None):
   args.focus=input('3 Extra focus [0=none]? ').strip(); args.focus='' if args.focus=='0' else args.focus
  numbers=resolve(args.selection); settings=load('settings.json'); workers=args.workers or settings['turbo_presets'].get(args.turbo or 'normal',settings['max_concurrent_calls']); provider=args.provider or settings['default_provider']; model=args.model or settings['models'].get(provider)
  est_tokens,est_seconds=estimate(numbers,args.limit)
- plan={'selection':args.selection,'stations':numbers,'limit':args.limit,'workers':workers,'provider':provider,'model':model,'redo':args.redo,'focus':args.focus,'items':args.item,'estimated_tokens':est_tokens,'estimated_seconds':est_seconds}
+ plan={'selection':args.selection,'stations':numbers,'limit':args.limit,'workers':workers,'provider':provider,'model':model,'redo':args.redo,'focus':args.focus,'template':args.template,'items':args.item,'estimated_tokens':est_tokens,'estimated_seconds':est_seconds}
  print('\n4 Confirm exact plan\n'+json.dumps(plan,indent=2))
  if sys.stdin.isatty() and not args.yes and input('Run [Y/n]? ').strip().lower() in ('n','no'): return 1
  state.write_text(json.dumps(plan,indent=2),encoding='utf-8'); reg=registry(); started=time.monotonic(); results=[]
  # Stations run in routine order. Each station owns item parallelism; this prevents cross-station multiplication.
  for n in numbers:
   s=reg[n]; accepted=set(s['options']); cmd=[sys.executable,str(API_HOME/s['folder']/s['script']),*args.item]
-  for flag,value in [('limit',args.limit),('workers',workers),('provider',provider),('model',model),('focus',args.focus)]:
+  for flag,value in [('limit',args.limit),('workers',workers),('provider',provider),('model',model),('focus',args.focus),('template',args.template)]:
    if flag in accepted and value not in (None,''): cmd += [f'--{flag}',str(value)]
   if args.redo and 'redo' in accepted: cmd.append('--redo')
   if args.dry_run: cmd.append('--dry-run') if n not in {'44','46','47','90','91'} else None
