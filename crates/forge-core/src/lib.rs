@@ -8,9 +8,11 @@
 //! * [`template`] Markdown job templates with front matter (minijinja)
 //! * [`pipeline`] INBOX -> OUTBOX runs, context import
 //! * [`hints`]    a note's front matter picks its own route (`priority: draft`, `compute: deep`)
+//! * [`clips`]    clipboard librarian: file clips by category, hold back secrets, periodic review
 //! * [`canon`]    /candidate, /search, /agenda for the Canon Workbench pages
 
 pub mod canon;
+pub mod clips;
 pub mod config;
 pub mod hints;
 pub mod limiter;

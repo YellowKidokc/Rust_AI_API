@@ -97,6 +97,11 @@ enum Cmd {
         #[command(subcommand)]
         cmd: LedgerCmd,
     },
+    /// Clipboard librarian: file clips into a library, hold back secrets, review the library.
+    Clips {
+        #[command(subcommand)]
+        cmd: ClipsCmd,
+    },
     /// List job templates, or show one.
     Templates { name: Option<String> },
     /// Check config, keys, database, templates.
@@ -129,6 +134,36 @@ enum CtxCmd {
         #[arg(long)]
         kind: Option<String>,
     },
+}
+
+#[derive(Subcommand)]
+enum ClipsCmd {
+    /// File every new clip in FOLDER into LIBRARY/<category>/<title>.md (free route by default).
+    Sort {
+        folder: PathBuf,
+        #[arg(long)]
+        library: PathBuf,
+        #[arg(long)]
+        route: Option<String>,
+        /// e.g. `free` to guarantee $0 (paid rungs are skipped).
+        #[arg(long)]
+        max_tier: Option<String>,
+        #[arg(long)]
+        redo: bool,
+        #[arg(long)]
+        dry_run: bool,
+        /// Only the first N clips this run.
+        #[arg(long)]
+        limit: Option<usize>,
+    },
+    /// Write LIBRARY/_review/<date>.md: merges, renames, misfiled clips, what stands out. Moves nothing.
+    Review {
+        library: PathBuf,
+        #[arg(long)]
+        route: Option<String>,
+    },
+    /// Rebuild LIBRARY/INDEX.md (no model call).
+    Index { library: PathBuf },
 }
 
 #[derive(Subcommand)]
@@ -380,6 +415,72 @@ async fn real_main(cli: Cli) -> Result<()> {
                 Ok(())
             }
         },
+        Cmd::Clips { cmd } => match cmd {
+            ClipsCmd::Sort {
+                folder,
+                library,
+                route,
+                max_tier,
+                redo,
+                dry_run,
+                limit,
+            } => {
+                let max_tier = parse_tier(max_tier)?;
+                let opts = forge_core::clips::SortOptions {
+                    library,
+                    route,
+                    max_tier,
+                    redo,
+                    dry_run,
+                    limit,
+                };
+                let results = forge.sort_clips(&folder, &opts).await?;
+                for f in &results {
+                    let t = chrono::Local::now().format("%H:%M:%S");
+                    match f.status.as_str() {
+                        "SKIPPED" => {}
+                        "DRY_RUN" => println!(
+                            "===== {} =====\n{}\n",
+                            f.clip,
+                            f.detail.as_deref().unwrap_or("")
+                        ),
+                        "FILED" => println!(
+                            "{t} FILED  {} -> {}/{} ({}, ${:.5})",
+                            f.clip,
+                            f.category.as_deref().unwrap_or(""),
+                            f.title.as_deref().unwrap_or(""),
+                            f.provider.as_deref().unwrap_or(""),
+                            f.cost_usd
+                        ),
+                        s => println!(
+                            "{t} {s:<6} {} {}",
+                            f.clip,
+                            f.detail.as_deref().unwrap_or("")
+                        ),
+                    }
+                }
+                let n = |s: &str| results.iter().filter(|f| f.status == s).count();
+                let cost: f64 = results.iter().map(|f| f.cost_usd).sum();
+                println!(
+                    "filed {} · held {} · skipped {} · failed {} · ${cost:.5}",
+                    n("FILED"),
+                    n("HELD"),
+                    n("SKIPPED"),
+                    n("FAILED")
+                );
+                Ok(())
+            }
+            ClipsCmd::Review { library, route } => {
+                let path = forge.review_clips(&library, route).await?;
+                println!("review written: {}", path.display());
+                Ok(())
+            }
+            ClipsCmd::Index { library } => {
+                forge_core::clips::write_index(&library)?;
+                println!("{}", library.join("INDEX.md").display());
+                Ok(())
+            }
+        },
         Cmd::Templates { name } => {
             match name {
                 Some(n) => {
@@ -432,6 +533,15 @@ async fn real_main(cli: Cli) -> Result<()> {
             Ok(())
         }
     }
+}
+
+fn parse_tier(t: Option<String>) -> Result<Option<Tier>> {
+    t.map(|t| {
+        serde_json::from_value::<Tier>(serde_json::json!(t)).map_err(|_| {
+            anyhow::anyhow!("unknown tier '{t}' (local, free, discount, standard, premium)")
+        })
+    })
+    .transpose()
 }
 
 #[allow(clippy::too_many_arguments)]

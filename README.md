@@ -103,6 +103,24 @@ same hash) unless `--redo`; more than 10 documents or an estimate over $0.50 ask
 `OUTBOX\<name> · <SUFFIX>.md` with provenance front matter; a replaced output moves to `OUTBOX\_older\<date>\`. Ctrl+C
 is ignored during a run; type `stop` to let in-flight documents finish and exit. `station\` has the `.bat` launchers.
 
+## Clipboard librarian
+
+Point it at the folder your clipboard app drops clips into (one `.txt`/`.md` per clip, local or on the NAS):
+
+```
+forge clips sort \\NAS\clips\inbox --library \\NAS\clips\Library --max-tier free   :: hourly: file new clips
+forge clips review \\NAS\clips\Library --route default                            :: every 8h: DeepSeek report
+```
+
+- Each new clip becomes `Library\<category>\<title>.md` with kind, tags and a one-line summary. Categories are the
+  model's call; it sees the existing ones and reuses them, so the library settles into your own shape over time.
+- Anything that looks like a password, API key, private key or card number goes to `Library\_held\` and is
+  **never sent to a model**.
+- Originals are never moved or deleted; already-filed clips are skipped by hash.
+- `INDEX.md` lists every category with titles and summaries. `review` writes `Library\_review\<date>.md`
+  (merge/rename suggestions, misfiled clips, what stands out, likely junk) and changes nothing.
+- `station\CLIPS SETUP.bat` sets the two folders, shows a dry run, and registers both as Windows scheduled tasks.
+
 ## HTTP gateway: `forge serve` (127.0.0.1:8790)
 
 | endpoint | for |
@@ -141,18 +159,22 @@ Tools: `forge_brief` (read first: `BRIEF.md`, routes, providers, templates), `fo
 ## Layout
 
 ```
-crates/forge-core   library: config, provider, router, limiter, store, template, pipeline, canon, parse
+crates/forge-core   library: config, provider, router, limiter, store, template, pipeline, hints, clips, canon, parse
 crates/forge        binary: main.rs (CLI), server.rs (HTTP), mcp.rs (MCP)
+crates/semtag-core  note-side tagging: tag block, inline labels, TSNS, fold, CSV, Mermaid (no network)
+crates/semtag-cli   offline semtag commands (apply, show-tags, fold, strip, ...)
+clipsync-cloudflare-app/   the React clipboard / research front end (Cloudflare Pages)
 config/             default providers.json, settings.json (compiled in as fallbacks)
 templates/          default job templates (compiled in as fallbacks)
 station/            .bat launchers and station layout
 docs/               semtag-build-prompt.md (the tagger spec that builds on this core)
 ```
 
-`cargo test` (34 tests: routing cascade, quotas, budget, truncation, cache, note route hints, limiter, FTS, canon
-contract, CORS, MCP handshake, INBOX→OUTBOX, lineage) · `cargo clippy --all-targets -- -D warnings` · CI builds `forge.exe` on Windows.
+`cargo test` (51 tests: forge's routing cascade, quotas, budget, truncation, cache, route hints, clip filing and
+secret hold-back, limiter, FTS, canon contract, CORS, MCP, INBOX→OUTBOX, lineage; plus semtag-core's suite) · `cargo clippy --all-targets -- -D warnings` · CI builds `forge.exe` on Windows.
 
 ## Not built yet
 
-Merging with `semtag-core` (branch `claude/semtag-core-m1`); streaming responses; provider batch APIs (the 50%-off overnight queues are a separate async flow); embedding search;
+`forge clips pull` from the clipsync backend (waiting on where that backend lives); semtag-cli calling models through
+forge-core; streaming responses; provider batch APIs (the 50%-off overnight queues are a separate async flow); embedding search;
 the desktop tray layer and `semtag` from `docs/`; admission/rulings (those stay with the Canon Workbench).

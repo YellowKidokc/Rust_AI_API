@@ -8,7 +8,7 @@ ambiguous, and where the desktop layer is headed.
 | Milestone | What | State |
 |---|---|---|
 | 1 | `semtag-core`: tag block, inline labels, TSNS, front-matter counts, Mermaid, CSV, fold, golden tests | done |
-| 2 | `semtag-llm`: providers, adaptive limiter, retries, receipts, mock; `test-provider`, `estimate`, `classify` | next |
+| 2 | `semtag-llm`: providers, adaptive limiter, retries, receipts, mock → **provided by `forge-core`** (router, limiter, ledger, receipts, mock). Remaining: `test-provider`, `estimate`, `classify` in semtag-cli on top of forge-core | next |
 | 3 | Batch + structural pass + resume + single writer; button flow | |
 | 4 | Registry + index + SQLite + journey / forward links | |
 | 5 | `import-plugin`, station folder and `.bat` launchers (fold and strip already exist in M1) | |

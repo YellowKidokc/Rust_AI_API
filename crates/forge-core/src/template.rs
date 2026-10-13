@@ -24,6 +24,11 @@ use serde::Serialize;
 pub const BUILTIN: &[(&str, &str)] = &[
     ("default", include_str!("../../../templates/default.md")),
     ("summarize", include_str!("../../../templates/summarize.md")),
+    ("sort-clip", include_str!("../../../templates/sort-clip.md")),
+    (
+        "review-clips",
+        include_str!("../../../templates/review-clips.md"),
+    ),
     (
         "extract-claims",
         include_str!("../../../templates/extract-claims.md"),
