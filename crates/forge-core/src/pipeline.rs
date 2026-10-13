@@ -11,6 +11,7 @@ use anyhow::{anyhow, Context, Result};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+use crate::hints;
 use crate::router::RouteRequest;
 use crate::store::{now, ContextHit};
 use crate::template::{self, Template};
@@ -28,6 +29,18 @@ pub struct RunOptions {
     pub workers: usize,
 }
 
+/// A document's prompt, ready to send.
+pub struct Prepared {
+    pub template: Template,
+    pub messages: Vec<Message>,
+    /// SHA-256 of source text + template: decides whether the document needs another run.
+    pub source_hash: String,
+    /// SHA-256 of the source text alone: the parent side of the lineage record.
+    pub text_sha256: String,
+    /// What the note's own front matter asked for (route, reason).
+    pub note_route: Option<(String, String)>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct DocResult {
     pub doc_id: String,
@@ -37,6 +50,8 @@ pub struct DocResult {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub cost_usd: f64,
+    /// Route used, and why it was chosen.
+    pub route: Option<String>,
     pub detail: Option<String>,
 }
 
@@ -142,8 +157,8 @@ fn shelve(target: &Path, outbox: &Path) -> Result<()> {
 }
 
 impl Forge {
-    /// Build the prompt for one document. Returns (template, messages, source_hash).
-    pub fn prepare(&self, path: &Path, job: &str) -> Result<(Template, Vec<Message>, String)> {
+    /// Build the prompt for one document.
+    pub fn prepare(&self, path: &Path, job: &str) -> Result<Prepared> {
         let tpl = template::load(&self.config.paths.templates_dir, job)?;
         let raw = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
         let text = raw.strip_prefix('\u{feff}').unwrap_or(&raw).to_string();
@@ -171,8 +186,14 @@ impl Forge {
             messages.push(Message::system(sys.clone()));
         }
         messages.push(Message::user(user));
-        let hash = source_hash(&text, &tpl);
-        Ok((tpl, messages, hash))
+        let note_route = hints::resolve(&hints::read(&text), &self.config.settings.hints);
+        Ok(Prepared {
+            source_hash: source_hash(&text, &tpl),
+            text_sha256: hex::encode(Sha256::digest(text.as_bytes())),
+            template: tpl,
+            messages,
+            note_route,
+        })
     }
 
     pub async fn run_one(&self, path: &Path, opts: &RunOptions) -> DocResult {
@@ -185,9 +206,10 @@ impl Forge {
             provider: None,
             model: None,
             cost_usd: 0.0,
+            route: None,
             detail: None,
         };
-        let (tpl, messages, hash) = match self.prepare(path, &opts.job) {
+        let Prepared { template: tpl, messages, source_hash: hash, text_sha256, note_route } = match self.prepare(path, &opts.job) {
             Ok(x) => x,
             Err(e) => {
                 res.detail = Some(format!("{e:#}"));
@@ -203,17 +225,26 @@ impl Forge {
                 }
             }
         }
+        // --route > the note's own front matter > the template > default_route.
+        let (route, why) = match (&opts.route, &note_route, &tpl.route) {
+            (Some(r), _, _) => (Some(r.clone()), "--route".to_string()),
+            (None, Some((r, why)), _) => (Some(r.clone()), why.clone()),
+            (None, None, Some(r)) => (Some(r.clone()), format!("template {}", tpl.name)),
+            (None, None, None) => (None, "default_route".to_string()),
+        };
+        res.route = Some(format!("{} ({why})", route.clone().unwrap_or_else(|| self.config.settings.default_route_name())));
         if opts.dry_run {
             res.status = "DRY_RUN".into();
             res.detail = Some(messages.iter().map(|m| format!("[{}]\n{}", m.role, m.content)).collect::<Vec<_>>().join("\n\n"));
             return res;
         }
         let req = RouteRequest {
-            route: opts.route.clone().or(tpl.route.clone()),
+            route,
             messages,
             json_mode: tpl.json,
             task: format!("run:{}", opts.job),
             doc_id: Some(id.clone()),
+            no_cache: opts.redo,
             ..Default::default()
         };
         let path_s = path.display().to_string();
@@ -231,6 +262,7 @@ impl Forge {
                     }
                 }
                 let out_path = opts.outbox.join(outbox_name(path, &tpl.suffix));
+                let out_sha = hex::encode(Sha256::digest(body.as_bytes()));
                 let doc = format!(
                     "---\nsource: '{}'\njob: {}\nroute: {}\nprovider: {}\nmodel: {}\ntokens_in: {}\ntokens_out: {}\ncost_usd: {:.6}\ncall_id: {}\ncreated: {}\n---\n\n{}\n",
                     path_s.replace('\'', "''"), opts.job, r.route, r.provider, r.model, r.reply.prompt_tokens,
@@ -246,6 +278,7 @@ impl Forge {
                     return res;
                 }
                 let _ = self.store.doc_upsert(&id, &path_s, &opts.job, &hash, "DONE", r.call_id, Some(&r.reply.text));
+                let _ = self.store.derivative_add(&id, &text_sha256, &opts.job, &out_path.display().to_string(), &out_sha, r.call_id);
                 res.status = "DONE".into();
                 res.output = Some(out_path.display().to_string());
                 res.provider = Some(r.provider);
@@ -288,6 +321,7 @@ impl Forge {
                     provider: None,
                     model: None,
                     cost_usd: 0.0,
+                    route: None,
                     detail: Some("not started: stop requested".into()),
                 });
                 continue;
@@ -326,6 +360,7 @@ fn panic_result(e: tokio::task::JoinError) -> DocResult {
         provider: None,
         model: None,
         cost_usd: 0.0,
+        route: None,
         detail: Some(format!("worker crashed: {e}")),
     }
 }

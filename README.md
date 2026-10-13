@@ -52,6 +52,15 @@ timeout, refusal, or a reply cut off at the token cap (a truncated reply is an e
 `forge ask --route free "..."`, `forge run INBOX --route free`, or `"route": "free"` from the pages / MCP.
 `--max-tier free` refuses anything that costs money.
 
+**A note can pick its own route** in its front matter: `route: reasoning`, or words in `priority`, `compute`, `mode`,
+`status` or `tags` matched against the `hints` list in `settings.json` (first rule wins). Defaults: `deep` → reasoning,
+`premium`/`final` → premium, `private` → local, `background`/`draft`/`low` → free. Precedence: `--route` > the note's
+front matter > the template's `route:` > `default_route`. `--dry-run` prints which route each note will take and why.
+
+**Repeat requests are free.** An identical request (same route, messages, mode and limits) is answered from the ledger's
+cache and logged as `CACHED` at $0; cached answers don't count against free-tier quotas. `--redo`, `--no-cache`, or
+`no_cache: true` forces a fresh call; `cache.enabled: false` turns it off.
+
 A rung is skipped (and `forge plan --route X` says why) when: its key is missing, it's not in `allowed_providers`, it got a
 429 and is cooling down, its `daily_requests` quota is used (counted from the ledger), it's outside its `window_utc`, the
 day's spend hit `budget.daily_usd`, or the prompt won't fit its `context_window`. Prices in `settings.json` are USD per 1M
@@ -60,7 +69,8 @@ tokens; check them against each provider's current price list, the ledger's cost
 ## The ledger
 
 `_data/forge.sqlite` (next to `config/`) holds every call (provider, model, rung, attempt, status, tokens, cost, latency,
-prompt SHA-256, output), each document's state (source hash, last job, last output, notes, history), the context library,
+prompt SHA-256, output), the response cache, lineage (which version of a source, by SHA-256, produced which output
+through which job and call), each document's state (source hash, last job, last output, notes, history), the context library,
 and the candidate graph. `LOGS/forge_receipts.jsonl` gets one line per call without prompt text. Full prompts are stored
 only if `ledger.store_prompts` is true.
 
@@ -139,10 +149,10 @@ station/            .bat launchers and station layout
 docs/               semtag-build-prompt.md (the tagger spec that builds on this core)
 ```
 
-`cargo test` (29 tests: routing cascade, quotas, budget, truncation, limiter, FTS, canon contract, CORS, MCP handshake,
-INBOX→OUTBOX) · `cargo clippy --all-targets -- -D warnings` · CI builds `forge.exe` on Windows.
+`cargo test` (34 tests: routing cascade, quotas, budget, truncation, cache, note route hints, limiter, FTS, canon
+contract, CORS, MCP handshake, INBOX→OUTBOX, lineage) · `cargo clippy --all-targets -- -D warnings` · CI builds `forge.exe` on Windows.
 
 ## Not built yet
 
-Streaming responses; provider batch APIs (the 50%-off overnight queues are a separate async flow); embedding search;
+Merging with `semtag-core` (branch `claude/semtag-core-m1`); streaming responses; provider batch APIs (the 50%-off overnight queues are a separate async flow); embedding search;
 the desktop tray layer and `semtag` from `docs/`; admission/rulings (those stay with the Canon Workbench).

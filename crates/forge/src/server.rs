@@ -196,7 +196,7 @@ fn openai_shape(r: &Routed) -> Value {
         "model": r.model,
         "choices": [{"index": 0, "message": {"role": "assistant", "content": r.reply.text}, "finish_reason": r.reply.finish_reason.clone().unwrap_or_else(|| "stop".into())}],
         "usage": {"prompt_tokens": r.reply.prompt_tokens, "completion_tokens": r.reply.completion_tokens, "total_tokens": r.reply.prompt_tokens + r.reply.completion_tokens},
-        "forge": {"route": r.route, "provider": r.provider, "tier": r.tier, "cost_usd": r.cost_usd, "call_id": r.call_id, "attempts": r.attempts},
+        "forge": {"route": r.route, "provider": r.provider, "tier": r.tier, "cost_usd": r.cost_usd, "call_id": r.call_id, "cached": r.cached, "attempts": r.attempts},
     })
 }
 
@@ -211,6 +211,8 @@ struct GenerateBody {
     json: bool,
     #[serde(default)]
     max_tokens: Option<u32>,
+    #[serde(default)]
+    no_cache: bool,
 }
 
 async fn generate(State(f): S, Json(b): Json<GenerateBody>) -> Result<Json<Value>, ApiError> {
@@ -226,13 +228,14 @@ async fn generate(State(f): S, Json(b): Json<GenerateBody>) -> Result<Json<Value
             messages,
             json_mode: b.json,
             max_tokens: b.max_tokens,
+            no_cache: b.no_cache,
             task: "http:generate".into(),
             ..Default::default()
         })
         .await?;
     Ok(Json(json!({
         "response": r.reply.text, "output": r.reply.text, "provider": r.provider, "model": r.model,
-        "route": r.route, "cost_usd": r.cost_usd, "call_id": r.call_id,
+        "route": r.route, "cost_usd": r.cost_usd, "call_id": r.call_id, "cached": r.cached,
     })))
 }
 

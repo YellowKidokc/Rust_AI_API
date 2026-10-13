@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 use crate::config::{Config, RouteEntry, Tier};
 use crate::limiter::AdaptiveLimiter;
 use crate::provider::{self, Provider};
-use crate::store::{now, CallRecord, Store};
+use crate::store::{now, CachedReply, CallRecord, Store};
 use crate::types::{estimate_tokens, ChatReply, ChatRequest, LlmError, Message};
 
 #[derive(Debug, Clone, Default)]
@@ -30,6 +30,8 @@ pub struct RouteRequest {
     pub pin: Option<(String, Option<String>)>,
     pub task: String,
     pub doc_id: Option<String>,
+    /// Always call a model, even if this exact request was answered before.
+    pub no_cache: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -63,6 +65,8 @@ pub struct Routed {
     pub cost_usd: f64,
     pub call_id: Option<i64>,
     pub attempts: Vec<Attempt>,
+    /// Served from the response cache: no model was called and nothing was spent.
+    pub cached: bool,
 }
 
 #[derive(Debug, Clone, Serialize, thiserror::Error)]
@@ -270,6 +274,50 @@ impl Router {
         let prompt_sha = hex::encode(Sha256::digest(prompt_text.as_bytes()));
         let mut attempts = Vec::new();
 
+        let use_cache = s.cache.enabled && !req.no_cache;
+        let cache_key = cache_key(&route, &req, s.output_token_cap, s.temperature);
+        if use_cache {
+            if let Ok(Some(hit)) = self.store.cache_get(&cache_key) {
+                let tier = hit.tier.as_deref().and_then(|t| serde_json::from_value(serde_json::json!(t)).ok()).unwrap_or_default();
+                let t = now();
+                let rec = CallRecord {
+                    task: if req.task.is_empty() { "adhoc".into() } else { req.task.clone() },
+                    doc_id: req.doc_id.clone(),
+                    route: Some(route.clone()),
+                    provider: hit.provider.clone(),
+                    model: hit.model.clone(),
+                    tier: hit.tier.clone().unwrap_or_default(),
+                    status: "CACHED".into(),
+                    prompt_tokens: hit.prompt_tokens,
+                    completion_tokens: hit.completion_tokens,
+                    finish_reason: hit.finish_reason.clone(),
+                    prompt_sha256: prompt_sha.clone(),
+                    started_at: t.clone(),
+                    finished_at: t,
+                    ..Default::default()
+                };
+                let call_id = self.store.record_call(&rec).ok();
+                self.receipt(&rec);
+                return Ok(Routed {
+                    reply: ChatReply {
+                        text: hit.text,
+                        prompt_tokens: hit.prompt_tokens,
+                        completion_tokens: hit.completion_tokens,
+                        finish_reason: hit.finish_reason,
+                        model: hit.model.clone(),
+                    },
+                    route,
+                    provider: hit.provider,
+                    model: hit.model,
+                    tier,
+                    cost_usd: 0.0,
+                    call_id,
+                    attempts,
+                    cached: true,
+                });
+            }
+        }
+
         for step in plan.iter().filter(|p| p.eligible) {
             let Some(provider) = self.providers.get(&step.provider).cloned() else { continue };
             let entry = self.find_entry(&step.provider, Some(&step.model)).cloned();
@@ -324,6 +372,20 @@ impl Router {
                         rec.output_text = Some(reply.text.clone());
                         let call_id = self.store.record_call(&rec).ok();
                         self.receipt(&rec);
+                        if use_cache {
+                            let _ = self.store.cache_put(
+                                &cache_key,
+                                &CachedReply {
+                                    provider: step.provider.clone(),
+                                    model: step.model.clone(),
+                                    tier: Some(step.tier.as_str().into()),
+                                    text: reply.text.clone(),
+                                    prompt_tokens: reply.prompt_tokens,
+                                    completion_tokens: reply.completion_tokens,
+                                    finish_reason: reply.finish_reason.clone(),
+                                },
+                            );
+                        }
                         attempts.push(Attempt {
                             provider: step.provider.clone(),
                             model: step.model.clone(),
@@ -342,6 +404,7 @@ impl Router {
                             cost_usd: cost,
                             call_id,
                             attempts,
+                            cached: false,
                         });
                     }
                     Err(err) => {
@@ -418,6 +481,20 @@ impl Router {
             tracing::warn!("receipt not written to {}: {e}", path.display());
         }
     }
+}
+
+/// Same route (or pin), same messages, same mode and limits -> same key. Tier/budget filters are not
+/// part of it: a cached answer costs nothing whichever rung produced it.
+fn cache_key(route: &str, req: &RouteRequest, default_cap: u32, default_temp: f32) -> String {
+    let v = serde_json::json!({
+        "route": route,
+        "pin": req.pin,
+        "messages": req.messages,
+        "json": req.json_mode,
+        "max_tokens": req.max_tokens.unwrap_or(default_cap),
+        "temperature": req.temperature.unwrap_or(default_temp),
+    });
+    hex::encode(Sha256::digest(crate::canon::canonical_json(&v).as_bytes()))
 }
 
 fn backoff(attempt: u32, base: f64, max: f64) -> Duration {
@@ -519,6 +596,20 @@ mod tests {
         let err = r.complete(ask("x")).await.unwrap_err();
         assert_eq!(err.attempts.len(), 2);
         assert!(err.message.contains("every eligible rung failed"));
+    }
+
+    #[tokio::test]
+    async fn identical_requests_are_served_from_cache_unless_no_cache() {
+        let r = router(r#"{"routes":{"default":[{"provider":"a","model":"m","price_in":1000000}]}}"#);
+        let first = r.complete(ask("same question")).await.unwrap();
+        assert!(!first.cached && first.cost_usd > 0.0);
+        let second = r.complete(ask("same question")).await.unwrap();
+        assert!(second.cached);
+        assert_eq!((second.reply.text.as_str(), second.cost_usd), (first.reply.text.as_str(), 0.0));
+        let fresh = r.complete(RouteRequest { no_cache: true, ..ask("same question") }).await.unwrap();
+        assert!(!fresh.cached);
+        // Cache hits don't use up a free tier's daily quota.
+        assert_eq!(r.store.requests_today("a", "m").unwrap(), 2);
     }
 
     #[test]

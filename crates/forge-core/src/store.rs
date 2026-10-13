@@ -119,6 +119,33 @@ CREATE TABLE IF NOT EXISTS conflicts (
     created_at  TEXT NOT NULL
 );
 
+-- Identical request (same route, messages, mode, limits) -> stored reply. Skipped with no_cache / --redo.
+CREATE TABLE IF NOT EXISTS cache (
+    key               TEXT PRIMARY KEY,
+    provider          TEXT NOT NULL,
+    model             TEXT NOT NULL,
+    tier              TEXT,
+    text              TEXT NOT NULL,
+    prompt_tokens     INTEGER NOT NULL DEFAULT 0,
+    completion_tokens INTEGER NOT NULL DEFAULT 0,
+    finish_reason     TEXT,
+    hits              INTEGER NOT NULL DEFAULT 0,
+    created_at        TEXT NOT NULL
+);
+
+-- Lineage: which source text (by hash) produced which output, through which job and call.
+CREATE TABLE IF NOT EXISTS derivatives (
+    id            INTEGER PRIMARY KEY,
+    parent_doc_id TEXT NOT NULL,
+    parent_sha256 TEXT NOT NULL,
+    job           TEXT NOT NULL,
+    output_path   TEXT NOT NULL,
+    output_sha256 TEXT NOT NULL,
+    call_id       INTEGER,
+    created_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS derivatives_parent ON derivatives(parent_doc_id);
+
 CREATE TABLE IF NOT EXISTS audits (
     id   INTEGER PRIMARY KEY,
     at   TEXT NOT NULL,
@@ -170,6 +197,17 @@ pub struct ContextHit {
     pub body: String,
     pub source: Option<String>,
     pub score: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CachedReply {
+    pub provider: String,
+    pub model: String,
+    pub tier: Option<String>,
+    pub text: String,
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+    pub finish_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -246,7 +284,7 @@ impl Store {
     pub fn requests_today(&self, provider: &str, model: &str) -> Result<u32> {
         let day = chrono::Utc::now().format("%Y-%m-%d").to_string();
         let n: i64 = self.lock().query_row(
-            "SELECT COUNT(*) FROM calls WHERE provider = ?1 AND model = ?2 AND substr(started_at,1,10) = ?3",
+            "SELECT COUNT(*) FROM calls WHERE provider = ?1 AND model = ?2 AND status <> 'CACHED' AND substr(started_at,1,10) = ?3",
             params![provider, model, day],
             |r| r.get(0),
         )?;
@@ -430,6 +468,76 @@ impl Store {
                 source: r.get(4)?,
                 score: -r.get::<_, f64>(5)?,
             })
+        })?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    // ---------------- cache ----------------
+
+    pub fn cache_get(&self, key: &str) -> Result<Option<CachedReply>> {
+        let db = self.lock();
+        let hit = db
+            .query_row(
+                "SELECT provider, model, tier, text, prompt_tokens, completion_tokens, finish_reason FROM cache WHERE key = ?1",
+                params![key],
+                |r| {
+                    Ok(CachedReply {
+                        provider: r.get(0)?,
+                        model: r.get(1)?,
+                        tier: r.get(2)?,
+                        text: r.get(3)?,
+                        prompt_tokens: r.get(4)?,
+                        completion_tokens: r.get(5)?,
+                        finish_reason: r.get(6)?,
+                    })
+                },
+            )
+            .optional()?;
+        if hit.is_some() {
+            db.execute("UPDATE cache SET hits = hits + 1 WHERE key = ?1", params![key])?;
+        }
+        Ok(hit)
+    }
+
+    pub fn cache_put(&self, key: &str, c: &CachedReply) -> Result<()> {
+        self.lock().execute(
+            "INSERT OR REPLACE INTO cache (key, provider, model, tier, text, prompt_tokens, completion_tokens, finish_reason, created_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+            params![key, c.provider, c.model, c.tier, c.text, c.prompt_tokens, c.completion_tokens, c.finish_reason, now()],
+        )?;
+        Ok(())
+    }
+
+    // ---------------- lineage ----------------
+
+    pub fn derivative_add(
+        &self,
+        parent_doc_id: &str,
+        parent_sha256: &str,
+        job: &str,
+        output_path: &str,
+        output_sha256: &str,
+        call_id: Option<i64>,
+    ) -> Result<()> {
+        self.lock().execute(
+            "INSERT INTO derivatives (parent_doc_id, parent_sha256, job, output_path, output_sha256, call_id, created_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7)",
+            params![parent_doc_id, parent_sha256, job, output_path, output_sha256, call_id, now()],
+        )?;
+        Ok(())
+    }
+
+    pub fn derivatives(&self, parent_doc_id: &str, limit: u32) -> Result<Vec<Value>> {
+        let db = self.lock();
+        let mut st = db.prepare(
+            "SELECT parent_sha256, job, output_path, output_sha256, call_id, created_at FROM derivatives
+             WHERE parent_doc_id = ?1 ORDER BY id DESC LIMIT ?2",
+        )?;
+        let rows = st.query_map(params![parent_doc_id, limit], |r| {
+            Ok(serde_json::json!({
+                "parent_sha256": r.get::<_, String>(0)?, "job": r.get::<_, String>(1)?, "output_path": r.get::<_, String>(2)?,
+                "output_sha256": r.get::<_, String>(3)?, "call_id": r.get::<_, Option<i64>>(4)?, "created_at": r.get::<_, String>(5)?,
+            }))
         })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }

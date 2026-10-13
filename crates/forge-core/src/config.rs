@@ -202,6 +202,25 @@ fn d_ctx_chars() -> usize {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CacheCfg {
+    /// Answer an identical request (same route, messages, mode, limits) from the ledger instead of calling again.
+    #[serde(default = "yes")]
+    pub enabled: bool,
+}
+impl Default for CacheCfg {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+/// A note front-matter word that picks a route (first match wins), e.g. `{ "when": "deep", "route": "reasoning" }`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RouteHint {
+    pub when: String,
+    pub route: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerCfg {
     #[serde(default = "d_port")]
     pub port: u16,
@@ -255,6 +274,10 @@ pub struct Settings {
     pub context: ContextCfg,
     #[serde(default)]
     pub server: ServerCfg,
+    #[serde(default)]
+    pub cache: CacheCfg,
+    #[serde(default)]
+    pub hints: Vec<RouteHint>,
 }
 
 fn d_conc() -> usize {

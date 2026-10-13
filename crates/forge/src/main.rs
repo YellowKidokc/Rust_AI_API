@@ -52,6 +52,9 @@ enum Cmd {
         /// Never use a rung above this tier: local, free, discount, standard, premium.
         #[arg(long)]
         max_tier: Option<String>,
+        /// Call a model even if this exact question was answered before.
+        #[arg(long)]
+        no_cache: bool,
     },
     /// Show what a route would try right now and why rungs are skipped.
     Plan {
@@ -173,7 +176,7 @@ async fn real_main(cli: Cli) -> Result<()> {
             server::serve(forge, &host, port).await
         }
         Cmd::Mcp => mcp::run(forge).await,
-        Cmd::Ask { prompt, route, system, context, json, max_tier } => {
+        Cmd::Ask { prompt, route, system, context, json, max_tier, no_cache } => {
             let prompt = prompt.join(" ");
             if prompt.trim().is_empty() {
                 bail!("nothing to ask");
@@ -197,13 +200,22 @@ async fn real_main(cli: Cli) -> Result<()> {
                 .map_err(|_| anyhow::anyhow!("unknown tier"))?;
             match forge
                 .router
-                .complete(RouteRequest { route, messages, json_mode: json, max_tier, task: "cli:ask".into(), ..Default::default() })
+                .complete(RouteRequest {
+                    route,
+                    messages,
+                    json_mode: json,
+                    max_tier,
+                    no_cache,
+                    task: "cli:ask".into(),
+                    ..Default::default()
+                })
                 .await
             {
                 Ok(r) => {
                     println!("{}", r.reply.text);
                     eprintln!(
-                        "\n— {} / {} ({}) · {} in / {} out · ${:.5} · call {}",
+                        "\n— {}{} / {} ({}) · {} in / {} out · ${:.5} · call {}",
+                        if r.cached { "cached · " } else { "" },
                         r.provider,
                         r.model,
                         r.tier.as_str(),
@@ -394,14 +406,17 @@ async fn run(
         .run_many(docs, opts, stop, move |r| {
             let t = chrono::Local::now().format("%H:%M:%S");
             match r.status.as_str() {
-                "DRY_RUN" => println!("===== {} =====\n{}\n", r.path, r.detail.as_deref().unwrap_or("")),
+                "DRY_RUN" => {
+                    println!("===== {} · route {} =====\n{}\n", r.path, r.route.as_deref().unwrap_or(""), r.detail.as_deref().unwrap_or(""))
+                }
                 "DONE" => println!(
-                    "{t} DONE    {} -> {} ({} / {}, ${:.5})",
+                    "{t} DONE    {} -> {} ({} / {}, ${:.5}) route {}",
                     r.doc_id,
                     r.output.as_deref().unwrap_or(""),
                     r.provider.as_deref().unwrap_or(""),
                     r.model.as_deref().unwrap_or(""),
-                    r.cost_usd
+                    r.cost_usd,
+                    r.route.as_deref().unwrap_or("")
                 ),
                 s => println!("{t} {s:<7} {} {}", r.doc_id, r.detail.as_deref().unwrap_or("")),
             }

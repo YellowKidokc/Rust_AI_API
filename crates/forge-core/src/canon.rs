@@ -72,8 +72,23 @@ pub fn content_hash(text: Option<&str>, atom: Option<&Value>) -> String {
     if let Some(o) = atom.as_object_mut() {
         o.remove("generated_at");
     }
-    let canon = json!({"text": text.unwrap_or(""), "atom": atom}).to_string();
+    let canon = canonical_json(&json!({"text": text.unwrap_or(""), "atom": atom}));
     hex::encode(Sha256::digest(canon.as_bytes()))
+}
+
+/// JSON with object keys sorted at every level, written by hand so the result doesn't depend on
+/// whether serde_json's `preserve_order` feature is on (another crate in the workspace may enable it).
+pub fn canonical_json(v: &Value) -> String {
+    match v {
+        Value::Object(o) => {
+            let mut keys: Vec<&String> = o.keys().collect();
+            keys.sort();
+            let parts: Vec<String> = keys.iter().map(|k| format!("{}:{}", Value::String((*k).clone()), canonical_json(&o[*k]))).collect();
+            format!("{{{}}}", parts.join(","))
+        }
+        Value::Array(a) => format!("[{}]", a.iter().map(canonical_json).collect::<Vec<_>>().join(",")),
+        other => other.to_string(),
+    }
 }
 
 /// Integrity checks that never block staging; they become reasons on the receipt.
@@ -309,6 +324,14 @@ mod tests {
 
     fn input(v: Value) -> CandidateInput {
         serde_json::from_value(v).unwrap()
+    }
+
+    #[test]
+    fn canonical_json_sorts_nested_keys() {
+        let mut inner = serde_json::Map::new();
+        inner.insert("z".into(), json!(1));
+        inner.insert("a".into(), json!([{"y": 2, "b": 3}]));
+        assert_eq!(canonical_json(&Value::Object(inner)), r#"{"a":[{"b":3,"y":2}],"z":1}"#);
     }
 
     #[test]

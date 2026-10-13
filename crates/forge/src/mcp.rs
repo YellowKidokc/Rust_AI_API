@@ -127,7 +127,8 @@ fn tools() -> Vec<Value> {
                    "use_context": {"type": "boolean", "description": "Prepend top context-library matches for the prompt."},
                    "context_query": {"type": "string", "description": "Search terms for the context (default: the prompt)."},
                    "max_tokens": {"type": "integer"},
-                   "max_tier": {"type": "string", "enum": ["local", "free", "discount", "standard", "premium"], "description": "Never use a rung above this tier."}
+                   "max_tier": {"type": "string", "enum": ["local", "free", "discount", "standard", "premium"], "description": "Never use a rung above this tier."},
+                   "no_cache": {"type": "boolean", "description": "Call a model even if this exact request was answered before."}
                }), &["prompt"])}),
         json!({"name": "forge_route_plan", "description": "Show which provider/model rungs a route would try right now, in order, and why any are skipped (missing key, quota used, cooling down after 429, budget reached, outside time window).",
                "inputSchema": obj(json!({"route": {"type": "string"}, "prompt": {"type": "string", "description": "Optional, for the context-window check."}}), &[])}),
@@ -135,11 +136,11 @@ fn tools() -> Vec<Value> {
                "inputSchema": obj(json!({"query": {"type": "string"}, "limit": {"type": "integer"}, "kind": {"type": "string", "description": "Only this kind (e.g. axiom, law, definition)."}}), &["query"])}),
         json!({"name": "context_add", "description": "Add or replace one snippet in the context library (same key replaces).",
                "inputSchema": obj(json!({"key": {"type": "string"}, "title": {"type": "string"}, "body": {"type": "string"}, "kind": {"type": "string"}, "source": {"type": "string"}, "tags": {"type": "string"}}), &["key", "title", "body"])}),
-        json!({"name": "doc_state", "description": "A document's pipeline state: last job, status, source hash, last output, notes, and recent events.",
+        json!({"name": "doc_state", "description": "A document's pipeline state: last job, status, source hash, last output, notes, recent events, and derivatives (which outputs came from which version of the text).",
                "inputSchema": obj(json!({"doc_id": {"type": "string", "description": "File name, e.g. 'Law 4.md'."}}), &["doc_id"])}),
         json!({"name": "doc_note", "description": "Attach a note to a document's state (carried into its history).",
                "inputSchema": obj(json!({"doc_id": {"type": "string"}, "note": {"type": "string"}}), &["doc_id", "note"])}),
-        json!({"name": "pipeline_run", "description": "Run a job template over a file or folder (INBOX style) and write OUTBOX results. Unchanged documents are skipped. More than 10 documents requires confirm=true. Use dry_run to see the exact prompt without calling a model.",
+        json!({"name": "pipeline_run", "description": "Run a job template over a file or folder (INBOX style) and write OUTBOX results. Unchanged documents are skipped; redo also bypasses the response cache. A note's front matter can pick its route (route:, or priority/compute/tags words such as draft, deep, private). More than 10 documents requires confirm=true. Use dry_run to see the exact prompt without calling a model.",
                "inputSchema": obj(json!({
                    "path": {"type": "string"}, "job": {"type": "string", "description": "Template name (see forge_brief)."},
                    "route": {"type": "string"}, "outbox": {"type": "string"}, "redo": {"type": "boolean"},
@@ -223,6 +224,7 @@ async fn call(forge: &Arc<Forge>, name: &str, a: &Value) -> Result<Value, String
                     json_mode: b(a, "json"),
                     max_tokens: n(a, "max_tokens").map(|x| x as u32),
                     max_tier,
+                    no_cache: b(a, "no_cache"),
                     task: "mcp:ask".into(),
                     ..Default::default()
                 })
@@ -233,7 +235,7 @@ async fn call(forge: &Arc<Forge>, name: &str, a: &Value) -> Result<Value, String
             Ok(json!({
                 "text": r.reply.text, "route": r.route, "provider": r.provider, "model": r.model, "tier": r.tier,
                 "tokens_in": r.reply.prompt_tokens, "tokens_out": r.reply.completion_tokens, "cost_usd": r.cost_usd,
-                "call_id": r.call_id, "context_used": used, "attempts": r.attempts,
+                "call_id": r.call_id, "cached": r.cached, "context_used": used, "attempts": r.attempts,
             }))
         }
         "forge_route_plan" => {
@@ -271,7 +273,10 @@ async fn call(forge: &Arc<Forge>, name: &str, a: &Value) -> Result<Value, String
         }
         "doc_state" => {
             let id = s(a, "doc_id").ok_or("doc_id is required")?;
-            Ok(json!({"state": forge.store.doc_get(id).map_err(e)?, "events": forge.store.doc_events(id, 20).map_err(e)?}))
+            Ok(json!({"state": forge.store.doc_get(id).map_err(e)?,
+                "events": forge.store.doc_events(id, 20).map_err(e)?,
+                "derivatives": forge.store.derivatives(id, 20).map_err(e)?,
+            }))
         }
         "doc_note" => {
             forge.store.doc_note(s(a, "doc_id").ok_or("doc_id is required")?, s(a, "note").ok_or("note is required")?).map_err(e)?;
@@ -414,5 +419,22 @@ mod tests {
         assert_eq!(redo["result"]["structuredContent"]["results"][0]["status"], "DONE");
         let older = tmp.path().join("OUTBOX").join("_older");
         assert!(older.is_dir(), "replaced output must be shelved, not deleted");
+        let state = rpc(&f, 4, "tools/call", json!({"name": "doc_state", "arguments": {"doc_id": "note one.md"}})).await;
+        assert_eq!(state["result"]["structuredContent"]["derivatives"].as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn note_front_matter_picks_the_route() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("hinted.md"), "---\npriority: draft\n---\nA draft.").unwrap();
+        let mut cfg = Config::from_strings(DEFAULT_PROVIDERS, DEFAULT_SETTINGS, tmp.path().to_path_buf(), None).unwrap();
+        cfg.settings.hints = vec![forge_core::config::RouteHint { when: "draft".into(), route: "test".into() }];
+        // The default route has no usable rung here (no keys), so only the hint can make this succeed.
+        let f = Forge::with_store(cfg, forge_core::Store::open_memory().unwrap()).unwrap();
+        let path = tmp.path().join("hinted.md").display().to_string();
+        let r = rpc(&f, 1, "tools/call", json!({"name": "pipeline_run", "arguments": {"path": path}})).await;
+        let res = &r["result"]["structuredContent"]["results"][0];
+        assert_eq!(res["status"], "DONE", "{r}");
+        assert_eq!(res["route"], "test (note marked 'draft')");
     }
 }
