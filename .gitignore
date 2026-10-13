@@ -1,0 +1,10 @@
+/target
+**/_data/
+**/LOGS/
+**/INBOX/
+**/OUTBOX/
+**/STATE/
+paths.json
+.env
+*.sqlite
+*.sqlite-*
