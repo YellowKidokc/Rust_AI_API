@@ -65,7 +65,9 @@ pub async fn run(forge: Arc<Forge>) -> anyhow::Result<()> {
 /// Handle one JSON-RPC message. Notifications (no `id`) get no reply.
 pub async fn handle(forge: &Arc<Forge>, msg: Value) -> Option<Value> {
     if msg.is_array() {
-        return Some(json!({"jsonrpc": "2.0", "id": null, "error": {"code": -32600, "message": "batches are not supported"}}));
+        return Some(
+            json!({"jsonrpc": "2.0", "id": null, "error": {"code": -32600, "message": "batches are not supported"}}),
+        );
     }
     let id = msg.get("id").cloned();
     let method = msg["method"].as_str().unwrap_or("");
@@ -75,7 +77,11 @@ pub async fn handle(forge: &Arc<Forge>, msg: Value) -> Option<Value> {
     let result: Result<Value, (i64, String)> = match method {
         "initialize" => {
             let asked = params["protocolVersion"].as_str().unwrap_or("");
-            let version = if PROTOCOL_VERSIONS.contains(&asked) { asked } else { PROTOCOL_VERSIONS[0] };
+            let version = if PROTOCOL_VERSIONS.contains(&asked) {
+                asked
+            } else {
+                PROTOCOL_VERSIONS[0]
+            };
             Ok(json!({
                 "protocolVersion": version,
                 "capabilities": {"tools": {"listChanged": false}},
@@ -90,8 +96,13 @@ pub async fn handle(forge: &Arc<Forge>, msg: Value) -> Option<Value> {
             let args = params.get("arguments").cloned().unwrap_or(json!({}));
             Ok(match call(forge, &name, &args).await {
                 Ok(v) => {
-                    let text = if let Some(s) = v.as_str() { s.to_string() } else { serde_json::to_string_pretty(&v).unwrap_or_default() };
-                    let mut r = json!({"content": [{"type": "text", "text": text}], "isError": false});
+                    let text = if let Some(s) = v.as_str() {
+                        s.to_string()
+                    } else {
+                        serde_json::to_string_pretty(&v).unwrap_or_default()
+                    };
+                    let mut r =
+                        json!({"content": [{"type": "text", "text": text}], "isError": false});
                     if v.is_object() {
                         r["structuredContent"] = v;
                     }
@@ -106,7 +117,9 @@ pub async fn handle(forge: &Arc<Forge>, msg: Value) -> Option<Value> {
     };
     Some(match result {
         Ok(r) => json!({"jsonrpc": "2.0", "id": id, "result": r}),
-        Err((code, message)) => json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}}),
+        Err((code, message)) => {
+            json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}})
+        }
     })
 }
 
@@ -179,7 +192,10 @@ async fn call(forge: &Arc<Forge>, name: &str, a: &Value) -> Result<Value, String
     let e = |x: anyhow::Error| format!("{x:#}");
     match name {
         "forge_brief" => {
-            let (route, steps) = forge.router.plan(&RouteRequest::default()).unwrap_or_default();
+            let (route, steps) = forge
+                .router
+                .plan(&RouteRequest::default())
+                .unwrap_or_default();
             Ok(json!({
                 "brief": forge.brief().unwrap_or_else(|| "No BRIEF.md yet. Put one next to the config folder, or context_add with key 'brief'.".into()),
                 "default_route": route,
@@ -201,7 +217,10 @@ async fn call(forge: &Arc<Forge>, name: &str, a: &Value) -> Result<Value, String
             let mut user = prompt.clone();
             if b(a, "use_context") {
                 let q = s(a, "context_query").unwrap_or(&prompt);
-                let hits = forge.store.context_search(q, forge.config.settings.context.top_k, None).map_err(e)?;
+                let hits = forge
+                    .store
+                    .context_search(q, forge.config.settings.context.top_k, None)
+                    .map_err(e)?;
                 if !hits.is_empty() {
                     used = hits.iter().map(|h| h.key.clone()).collect();
                     user = format!(
@@ -213,7 +232,10 @@ async fn call(forge: &Arc<Forge>, name: &str, a: &Value) -> Result<Value, String
             }
             messages.push(Message::user(user));
             let max_tier = match s(a, "max_tier") {
-                Some(t) => Some(serde_json::from_value::<Tier>(json!(t)).map_err(|_| format!("unknown tier {t}"))?),
+                Some(t) => Some(
+                    serde_json::from_value::<Tier>(json!(t))
+                        .map_err(|_| format!("unknown tier {t}"))?,
+                ),
                 None => None,
             };
             let r = forge
@@ -230,7 +252,10 @@ async fn call(forge: &Arc<Forge>, name: &str, a: &Value) -> Result<Value, String
                 })
                 .await
                 .map_err(|f| {
-                    serde_json::to_string_pretty(&json!({"error": f.message, "plan": f.plan, "attempts": f.attempts})).unwrap_or(f.message)
+                    serde_json::to_string_pretty(
+                        &json!({"error": f.message, "plan": f.plan, "attempts": f.attempts}),
+                    )
+                    .unwrap_or(f.message)
                 })?;
             Ok(json!({
                 "text": r.reply.text, "route": r.route, "provider": r.provider, "model": r.model, "tier": r.tier,
@@ -252,7 +277,11 @@ async fn call(forge: &Arc<Forge>, name: &str, a: &Value) -> Result<Value, String
         "context_search" => {
             let hits = forge
                 .store
-                .context_search(s(a, "query").ok_or("query is required")?, n(a, "limit").unwrap_or(5).min(50) as usize, s(a, "kind"))
+                .context_search(
+                    s(a, "query").ok_or("query is required")?,
+                    n(a, "limit").unwrap_or(5).min(50) as usize,
+                    s(a, "kind"),
+                )
                 .map_err(e)?;
             Ok(json!({"hits": hits}))
         }
@@ -279,7 +308,13 @@ async fn call(forge: &Arc<Forge>, name: &str, a: &Value) -> Result<Value, String
             }))
         }
         "doc_note" => {
-            forge.store.doc_note(s(a, "doc_id").ok_or("doc_id is required")?, s(a, "note").ok_or("note is required")?).map_err(e)?;
+            forge
+                .store
+                .doc_note(
+                    s(a, "doc_id").ok_or("doc_id is required")?,
+                    s(a, "note").ok_or("note is required")?,
+                )
+                .map_err(e)?;
             Ok(json!({"ok": true}))
         }
         "pipeline_run" => {
@@ -290,9 +325,14 @@ async fn call(forge: &Arc<Forge>, name: &str, a: &Value) -> Result<Value, String
             }
             let dry = b(a, "dry_run");
             if docs.len() > 10 && !b(a, "confirm") && !dry {
-                return Err(format!("{} documents found. More than 10 needs confirm=true (or dry_run=true first).", docs.len()));
+                return Err(format!(
+                    "{} documents found. More than 10 needs confirm=true (or dry_run=true first).",
+                    docs.len()
+                ));
             }
-            let outbox = s(a, "outbox").map(PathBuf::from).unwrap_or_else(|| default_outbox(&path));
+            let outbox = s(a, "outbox")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| default_outbox(&path));
             let opts = RunOptions {
                 job: s(a, "job").unwrap_or("default").into(),
                 outbox,
@@ -301,25 +341,31 @@ async fn call(forge: &Arc<Forge>, name: &str, a: &Value) -> Result<Value, String
                 dry_run: dry,
                 workers: n(a, "workers").unwrap_or(4).clamp(1, 60) as usize,
             };
-            let results = forge.run_many(docs, opts, Arc::new(AtomicBool::new(false)), |_| {}).await;
+            let results = forge
+                .run_many(docs, opts, Arc::new(AtomicBool::new(false)), |_| {})
+                .await;
             Ok(json!({"results": results}))
         }
         "template_show" => {
-            let t = template::load(&forge.config.paths.templates_dir, s(a, "name").ok_or("name is required")?).map_err(e)?;
+            let t = template::load(
+                &forge.config.paths.templates_dir,
+                s(a, "name").ok_or("name is required")?,
+            )
+            .map_err(e)?;
             Ok(json!(t))
         }
         "canon_stage" => {
-            let input: CandidateInput =
-                serde_json::from_value(a.clone()).map_err(|x| format!("candidate rejected: {x}. Put extra fields inside `atom`."))?;
+            let input: CandidateInput = serde_json::from_value(a.clone())
+                .map_err(|x| format!("candidate rejected: {x}. Put extra fields inside `atom`."))?;
             let r = canon::stage(&forge.store, input).map_err(|x| x.to_string())?;
             Ok(json!(r))
         }
         "canon_search" => Ok(
             json!({"results": canon::search(&forge.store, s(a, "q").ok_or("q is required")?, n(a, "limit").unwrap_or(10).min(200) as u32).map_err(|x| x.to_string())?}),
         ),
-        "canon_agenda" => {
-            Ok(json!({"items": canon::agenda(&forge.store, n(a, "limit").unwrap_or(50).min(500) as u32).map_err(|x| x.to_string())?}))
-        }
+        "canon_agenda" => Ok(
+            json!({"items": canon::agenda(&forge.store, n(a, "limit").unwrap_or(50).min(500) as u32).map_err(|x| x.to_string())?}),
+        ),
         "ledger" => Ok(json!({
             "recent": forge.store.recent_calls(n(a, "limit").unwrap_or(20).min(500) as u32).map_err(e)?,
             "by_model": forge.store.stats(n(a, "days").unwrap_or(1) as u32).map_err(e)?,
@@ -331,9 +377,20 @@ async fn call(forge: &Arc<Forge>, name: &str, a: &Value) -> Result<Value, String
 
 /// `<folder>/../OUTBOX` when running on an INBOX folder, else `<folder>/OUTBOX`.
 pub fn default_outbox(path: &std::path::Path) -> PathBuf {
-    let dir = if path.is_file() { path.parent().unwrap_or(path).to_path_buf() } else { path.to_path_buf() };
-    let dir = if dir.file_name().is_some_and(|n| n == "00_PRIORITY") { dir.parent().unwrap_or(&dir).to_path_buf() } else { dir };
-    if dir.file_name().is_some_and(|n| n.eq_ignore_ascii_case("INBOX")) {
+    let dir = if path.is_file() {
+        path.parent().unwrap_or(path).to_path_buf()
+    } else {
+        path.to_path_buf()
+    };
+    let dir = if dir.file_name().is_some_and(|n| n == "00_PRIORITY") {
+        dir.parent().unwrap_or(&dir).to_path_buf()
+    } else {
+        dir
+    };
+    if dir
+        .file_name()
+        .is_some_and(|n| n.eq_ignore_ascii_case("INBOX"))
+    {
         dir.parent().unwrap_or(&dir).join("OUTBOX")
     } else {
         dir.join("OUTBOX")
@@ -346,13 +403,19 @@ mod tests {
     use forge_core::config::{Config, DEFAULT_PROVIDERS, DEFAULT_SETTINGS};
 
     fn forge(base: PathBuf) -> Arc<Forge> {
-        let mut cfg = Config::from_strings(DEFAULT_PROVIDERS, DEFAULT_SETTINGS, base, None).unwrap();
+        let mut cfg =
+            Config::from_strings(DEFAULT_PROVIDERS, DEFAULT_SETTINGS, base, None).unwrap();
         cfg.settings.default_route = Some("test".into());
         Forge::with_store(cfg, forge_core::Store::open_memory().unwrap()).unwrap()
     }
 
     async fn rpc(f: &Arc<Forge>, id: i64, method: &str, params: Value) -> Value {
-        handle(f, json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params})).await.unwrap()
+        handle(
+            f,
+            json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}),
+        )
+        .await
+        .unwrap()
     }
 
     #[tokio::test]
@@ -366,9 +429,19 @@ mod tests {
         )
         .await;
         assert_eq!(init["result"]["protocolVersion"], "2025-03-26");
-        assert!(handle(&f, json!({"jsonrpc": "2.0", "method": "notifications/initialized"})).await.is_none());
+        assert!(handle(
+            &f,
+            json!({"jsonrpc": "2.0", "method": "notifications/initialized"})
+        )
+        .await
+        .is_none());
         let list = rpc(&f, 2, "tools/list", json!({})).await;
-        let names: Vec<&str> = list["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
+        let names: Vec<&str> = list["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
         assert!(names.contains(&"forge_ask") && names.contains(&"canon_stage"));
         assert_eq!(rpc(&f, 3, "nope", json!({})).await["error"]["code"], -32601);
     }
@@ -388,9 +461,27 @@ mod tests {
         let sc = &ask["result"]["structuredContent"];
         assert_eq!(sc["provider"], "mock", "{ask}");
         assert_eq!(sc["context_used"][0], "law9");
-        let led = rpc(&f, 3, "tools/call", json!({"name": "ledger", "arguments": {}})).await;
-        assert_eq!(led["result"]["structuredContent"]["recent"].as_array().unwrap().len(), 1);
-        let bad = rpc(&f, 4, "tools/call", json!({"name": "canon_stage", "arguments": {"atom": {}, "stray": 1}})).await;
+        let led = rpc(
+            &f,
+            3,
+            "tools/call",
+            json!({"name": "ledger", "arguments": {}}),
+        )
+        .await;
+        assert_eq!(
+            led["result"]["structuredContent"]["recent"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        let bad = rpc(
+            &f,
+            4,
+            "tools/call",
+            json!({"name": "canon_stage", "arguments": {"atom": {}, "stray": 1}}),
+        )
+        .await;
         assert_eq!(bad["result"]["isError"], true);
     }
 
@@ -406,9 +497,14 @@ mod tests {
         let res = &r["result"]["structuredContent"]["results"][0];
         assert_eq!(res["status"], "DONE", "{r}");
         let out = tmp.path().join("OUTBOX").join("note one · SUMMARY.md");
-        assert!(std::fs::read_to_string(&out).unwrap().contains("provider: mock"));
+        assert!(std::fs::read_to_string(&out)
+            .unwrap()
+            .contains("provider: mock"));
         let again = rpc(&f, 2, "tools/call", args).await;
-        assert_eq!(again["result"]["structuredContent"]["results"][0]["status"], "SKIPPED");
+        assert_eq!(
+            again["result"]["structuredContent"]["results"][0]["status"],
+            "SKIPPED"
+        );
         let redo = rpc(
             &f,
             3,
@@ -416,23 +512,60 @@ mod tests {
             json!({"name": "pipeline_run", "arguments": {"path": inbox.display().to_string(), "job": "summarize", "redo": true}}),
         )
         .await;
-        assert_eq!(redo["result"]["structuredContent"]["results"][0]["status"], "DONE");
+        assert_eq!(
+            redo["result"]["structuredContent"]["results"][0]["status"],
+            "DONE"
+        );
         let older = tmp.path().join("OUTBOX").join("_older");
-        assert!(older.is_dir(), "replaced output must be shelved, not deleted");
-        let state = rpc(&f, 4, "tools/call", json!({"name": "doc_state", "arguments": {"doc_id": "note one.md"}})).await;
-        assert_eq!(state["result"]["structuredContent"]["derivatives"].as_array().unwrap().len(), 2);
+        assert!(
+            older.is_dir(),
+            "replaced output must be shelved, not deleted"
+        );
+        let state = rpc(
+            &f,
+            4,
+            "tools/call",
+            json!({"name": "doc_state", "arguments": {"doc_id": "note one.md"}}),
+        )
+        .await;
+        assert_eq!(
+            state["result"]["structuredContent"]["derivatives"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
     }
 
     #[tokio::test]
     async fn note_front_matter_picks_the_route() {
         let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(tmp.path().join("hinted.md"), "---\npriority: draft\n---\nA draft.").unwrap();
-        let mut cfg = Config::from_strings(DEFAULT_PROVIDERS, DEFAULT_SETTINGS, tmp.path().to_path_buf(), None).unwrap();
-        cfg.settings.hints = vec![forge_core::config::RouteHint { when: "draft".into(), route: "test".into() }];
+        std::fs::write(
+            tmp.path().join("hinted.md"),
+            "---\npriority: draft\n---\nA draft.",
+        )
+        .unwrap();
+        let mut cfg = Config::from_strings(
+            DEFAULT_PROVIDERS,
+            DEFAULT_SETTINGS,
+            tmp.path().to_path_buf(),
+            None,
+        )
+        .unwrap();
+        cfg.settings.hints = vec![forge_core::config::RouteHint {
+            when: "draft".into(),
+            route: "test".into(),
+        }];
         // The default route has no usable rung here (no keys), so only the hint can make this succeed.
         let f = Forge::with_store(cfg, forge_core::Store::open_memory().unwrap()).unwrap();
         let path = tmp.path().join("hinted.md").display().to_string();
-        let r = rpc(&f, 1, "tools/call", json!({"name": "pipeline_run", "arguments": {"path": path}})).await;
+        let r = rpc(
+            &f,
+            1,
+            "tools/call",
+            json!({"name": "pipeline_run", "arguments": {"path": path}}),
+        )
+        .await;
         let res = &r["result"]["structuredContent"]["results"][0];
         assert_eq!(res["status"], "DONE", "{r}");
         assert_eq!(res["route"], "test (note marked 'draft')");

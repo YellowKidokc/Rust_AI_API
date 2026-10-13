@@ -17,7 +17,11 @@ use forge_core::pipeline::{self, RunOptions};
 use forge_core::{template, Config, Forge, Message, RouteRequest, Tier};
 
 #[derive(Parser)]
-#[command(name = "forge", version, about = "Local AI workbench: one router, one ledger, CLI + HTTP gateway + MCP server.")]
+#[command(
+    name = "forge",
+    version,
+    about = "Local AI workbench: one router, one ledger, CLI + HTTP gateway + MCP server."
+)]
 struct Cli {
     /// Use this folder (containing config/) instead of searching for one.
     #[arg(long, global = true)]
@@ -149,9 +153,14 @@ fn main() -> Result<()> {
     // Logs to stderr always: stdout belongs to MCP in `forge mcp`.
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
-        .with_env_filter(tracing_subscriber::EnvFilter::try_from_env("FORGE_LOG").unwrap_or_else(|_| "warn".into()))
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_env("FORGE_LOG")
+                .unwrap_or_else(|_| "warn".into()),
+        )
         .init();
-    let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
     rt.block_on(real_main(cli))
 }
 
@@ -176,7 +185,15 @@ async fn real_main(cli: Cli) -> Result<()> {
             server::serve(forge, &host, port).await
         }
         Cmd::Mcp => mcp::run(forge).await,
-        Cmd::Ask { prompt, route, system, context, json, max_tier, no_cache } => {
+        Cmd::Ask {
+            prompt,
+            route,
+            system,
+            context,
+            json,
+            max_tier,
+            no_cache,
+        } => {
             let prompt = prompt.join(" ");
             if prompt.trim().is_empty() {
                 bail!("nothing to ask");
@@ -187,10 +204,23 @@ async fn real_main(cli: Cli) -> Result<()> {
             }
             let mut user = prompt.clone();
             if context {
-                let hits = forge.store.context_search(&prompt, forge.config.settings.context.top_k, None)?;
+                let hits = forge.store.context_search(
+                    &prompt,
+                    forge.config.settings.context.top_k,
+                    None,
+                )?;
                 if !hits.is_empty() {
-                    eprintln!("context: {}", hits.iter().map(|h| h.key.as_str()).collect::<Vec<_>>().join(", "));
-                    user = format!("Background:\n{}\n{prompt}", pipeline::render_context(&hits, forge.config.settings.context.max_chars));
+                    eprintln!(
+                        "context: {}",
+                        hits.iter()
+                            .map(|h| h.key.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
+                    user = format!(
+                        "Background:\n{}\n{prompt}",
+                        pipeline::render_context(&hits, forge.config.settings.context.max_chars)
+                    );
                 }
             }
             messages.push(Message::user(user));
@@ -228,42 +258,88 @@ async fn real_main(cli: Cli) -> Result<()> {
                 }
                 Err(f) => {
                     for a in &f.attempts {
-                        eprintln!("  {} {} #{}: {}", a.provider, a.model, a.attempt, a.error.as_deref().unwrap_or("ok"));
+                        eprintln!(
+                            "  {} {} #{}: {}",
+                            a.provider,
+                            a.model,
+                            a.attempt,
+                            a.error.as_deref().unwrap_or("ok")
+                        );
                     }
                     bail!(f.message)
                 }
             }
         }
         Cmd::Plan { route } => {
-            let (name, steps) = forge.router.plan(&RouteRequest { route, ..Default::default() }).map_err(anyhow::Error::msg)?;
+            let (name, steps) = forge
+                .router
+                .plan(&RouteRequest {
+                    route,
+                    ..Default::default()
+                })
+                .map_err(anyhow::Error::msg)?;
             println!(
                 "route: {name}   (spend today ${:.4}, budget {:?})",
                 forge.store.spend_today()?,
                 forge.config.settings.budget.daily_usd
             );
             for s in steps {
-                println!("  {} {:<11} {:<34} {:<9} {}", if s.eligible { "✔" } else { "✘" }, s.provider, s.model, s.tier.as_str(), s.reason);
+                println!(
+                    "  {} {:<11} {:<34} {:<9} {}",
+                    if s.eligible { "✔" } else { "✘" },
+                    s.provider,
+                    s.model,
+                    s.tier.as_str(),
+                    s.reason
+                );
             }
             Ok(())
         }
-        Cmd::Run { path, job, out, route, workers, redo, yes, dry_run } => {
-            run(forge, path, job, out, route, workers, redo, yes, dry_run).await
-        }
+        Cmd::Run {
+            path,
+            job,
+            out,
+            route,
+            workers,
+            redo,
+            yes,
+            dry_run,
+        } => run(forge, path, job, out, route, workers, redo, yes, dry_run).await,
         Cmd::Context { cmd } => match cmd {
             CtxCmd::Import { path, kind, lines } => {
                 let n = pipeline::import_context(&forge, &path, &kind, lines)?;
-                println!("imported {n} snippet(s); library now holds {}", forge.store.context_count()?);
+                println!(
+                    "imported {n} snippet(s); library now holds {}",
+                    forge.store.context_count()?
+                );
                 Ok(())
             }
-            CtxCmd::Add { key, title, body, kind } => {
-                forge.store.context_put(&key, &kind, &title, &body, None, None)?;
+            CtxCmd::Add {
+                key,
+                title,
+                body,
+                kind,
+            } => {
+                forge
+                    .store
+                    .context_put(&key, &kind, &title, &body, None, None)?;
                 println!("saved {key}");
                 Ok(())
             }
             CtxCmd::Search { query, limit, kind } => {
-                for h in forge.store.context_search(&query.join(" "), limit, kind.as_deref())? {
+                for h in forge
+                    .store
+                    .context_search(&query.join(" "), limit, kind.as_deref())?
+                {
                     let body: String = h.body.chars().take(160).collect();
-                    println!("{:>6.2}  [{}] {} — {}\n        {}", h.score, h.kind, h.key, h.title, body.replace('\n', " "));
+                    println!(
+                        "{:>6.2}  [{}] {} — {}\n        {}",
+                        h.score,
+                        h.kind,
+                        h.key,
+                        h.title,
+                        body.replace('\n', " ")
+                    );
                 }
                 Ok(())
             }
@@ -274,7 +350,11 @@ async fn real_main(cli: Cli) -> Result<()> {
                     println!(
                         "{:>5} {} {:<8} {:<10} {:<28} {:>6}/{:<6} ${:<9.5} {}",
                         c["id"],
-                        c["started_at"].as_str().unwrap_or("").get(..19).unwrap_or(""),
+                        c["started_at"]
+                            .as_str()
+                            .unwrap_or("")
+                            .get(..19)
+                            .unwrap_or(""),
                         c["status"].as_str().unwrap_or(""),
                         c["provider"].as_str().unwrap_or(""),
                         c["model"].as_str().unwrap_or(""),
@@ -287,7 +367,10 @@ async fn real_main(cli: Cli) -> Result<()> {
                 Ok(())
             }
             LedgerCmd::Stats { days } => {
-                println!("{}", serde_json::to_string_pretty(&forge.store.stats(days)?)?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&forge.store.stats(days)?)?
+                );
                 println!("spend today: ${:.4}", forge.store.spend_today()?);
                 Ok(())
             }
@@ -315,17 +398,37 @@ async fn real_main(cli: Cli) -> Result<()> {
             let p = &forge.config.paths;
             println!(
                 "config:     {}",
-                p.config_dir.as_ref().map(|d| d.display().to_string()).unwrap_or_else(|| "built-in defaults (run `forge init`)".into())
+                p.config_dir
+                    .as_ref()
+                    .map(|d| d.display().to_string())
+                    .unwrap_or_else(|| "built-in defaults (run `forge init`)".into())
             );
             println!("database:   {}", forge.store.path);
-            println!("templates:  {} ({})", p.templates_dir.display(), template::list(&p.templates_dir).join(", "));
-            println!("brief:      {}", if forge.brief().is_some() { "present" } else { "missing (BRIEF.md next to config/)" });
+            println!(
+                "templates:  {} ({})",
+                p.templates_dir.display(),
+                template::list(&p.templates_dir).join(", ")
+            );
+            println!(
+                "brief:      {}",
+                if forge.brief().is_some() {
+                    "present"
+                } else {
+                    "missing (BRIEF.md next to config/)"
+                }
+            );
             println!("context:    {} snippet(s)", forge.store.context_count()?);
-            println!("ready:      {}", forge.router.available_providers().join(", "));
+            println!(
+                "ready:      {}",
+                forge.router.available_providers().join(", ")
+            );
             for (n, why) in forge.router.unavailable_providers() {
                 println!("unavailable {n}: {why}");
             }
-            println!("default route: {}", forge.config.settings.default_route_name());
+            println!(
+                "default route: {}",
+                forge.config.settings.default_route_name()
+            );
             Ok(())
         }
     }
@@ -350,13 +453,26 @@ async fn run(
     // Template errors surface before anything is sent.
     template::load(&forge.config.paths.templates_dir, &job)?;
     let outbox = out.unwrap_or_else(|| mcp::default_outbox(&path));
-    println!("{} document(s), job '{job}', output -> {}", docs.len(), outbox.display());
+    println!(
+        "{} document(s), job '{job}', output -> {}",
+        docs.len(),
+        outbox.display()
+    );
 
     if !dry_run && !yes {
-        let (route_name, steps) =
-            forge.router.plan(&RouteRequest { route: route.clone(), ..Default::default() }).map_err(anyhow::Error::msg)?;
+        let (route_name, steps) = forge
+            .router
+            .plan(&RouteRequest {
+                route: route.clone(),
+                ..Default::default()
+            })
+            .map_err(anyhow::Error::msg)?;
         let first = steps.iter().find(|s| s.eligible);
-        let chars: usize = docs.iter().filter_map(|d| std::fs::metadata(d).ok()).map(|m| m.len() as usize).sum();
+        let chars: usize = docs
+            .iter()
+            .filter_map(|d| std::fs::metadata(d).ok())
+            .map(|m| m.len() as usize)
+            .sum();
         let tokens_in = forge_core::types::estimate_tokens(chars);
         let est = first
             .and_then(|s| forge.router.find_entry(&s.provider, Some(&s.model)))
@@ -364,7 +480,9 @@ async fn run(
             .unwrap_or(0.0);
         println!(
             "route {route_name}: first rung {} · ~{tokens_in} input tokens · est. ${est:.4}",
-            first.map(|s| format!("{} / {}", s.provider, s.model)).unwrap_or_else(|| "NONE ELIGIBLE".into())
+            first
+                .map(|s| format!("{} / {}", s.provider, s.model))
+                .unwrap_or_else(|| "NONE ELIGIBLE".into())
         );
         if docs.len() > 10 || est > 0.5 {
             print!("Run {} document(s)? type yes: ", docs.len());
@@ -386,7 +504,9 @@ async fn run(
                 if tokio::signal::ctrl_c().await.is_err() {
                     break;
                 }
-                eprintln!("[Ctrl+C ignored — type `stop` and Enter to stop after in-flight documents]");
+                eprintln!(
+                    "[Ctrl+C ignored — type `stop` and Enter to stop after in-flight documents]"
+                );
             }
         });
         let s2 = stop.clone();
@@ -401,13 +521,25 @@ async fn run(
         });
     }
 
-    let opts = RunOptions { job, outbox, route, redo, dry_run, workers: workers.clamp(1, 60) };
+    let opts = RunOptions {
+        job,
+        outbox,
+        route,
+        redo,
+        dry_run,
+        workers: workers.clamp(1, 60),
+    };
     let results = forge
         .run_many(docs, opts, stop, move |r| {
             let t = chrono::Local::now().format("%H:%M:%S");
             match r.status.as_str() {
                 "DRY_RUN" => {
-                    println!("===== {} · route {} =====\n{}\n", r.path, r.route.as_deref().unwrap_or(""), r.detail.as_deref().unwrap_or(""))
+                    println!(
+                        "===== {} · route {} =====\n{}\n",
+                        r.path,
+                        r.route.as_deref().unwrap_or(""),
+                        r.detail.as_deref().unwrap_or("")
+                    )
                 }
                 "DONE" => println!(
                     "{t} DONE    {} -> {} ({} / {}, ${:.5}) route {}",
@@ -418,7 +550,11 @@ async fn run(
                     r.cost_usd,
                     r.route.as_deref().unwrap_or("")
                 ),
-                s => println!("{t} {s:<7} {} {}", r.doc_id, r.detail.as_deref().unwrap_or("")),
+                s => println!(
+                    "{t} {s:<7} {} {}",
+                    r.doc_id,
+                    r.detail.as_deref().unwrap_or("")
+                ),
             }
         })
         .await;
@@ -439,11 +575,21 @@ async fn run(
 
 fn init(dir: PathBuf) -> Result<()> {
     let files: Vec<(PathBuf, &str)> = [
-        (dir.join("config").join("providers.json"), forge_core::config::DEFAULT_PROVIDERS),
-        (dir.join("config").join("settings.json"), forge_core::config::DEFAULT_SETTINGS),
+        (
+            dir.join("config").join("providers.json"),
+            forge_core::config::DEFAULT_PROVIDERS,
+        ),
+        (
+            dir.join("config").join("settings.json"),
+            forge_core::config::DEFAULT_SETTINGS,
+        ),
     ]
     .into_iter()
-    .chain(template::BUILTIN.iter().map(|(n, t)| (dir.join("templates").join(format!("{n}.md")), *t)))
+    .chain(
+        template::BUILTIN
+            .iter()
+            .map(|(n, t)| (dir.join("templates").join(format!("{n}.md")), *t)),
+    )
     .collect();
     for (path, text) in files {
         if path.exists() {

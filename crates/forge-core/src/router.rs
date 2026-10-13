@@ -97,7 +97,10 @@ impl Router {
         let mut unavailable = BTreeMap::new();
         for name in cfg.providers.keys() {
             let Some(def) = cfg.provider(name) else {
-                unavailable.insert(name.clone(), "alias_of points at an unknown provider".into());
+                unavailable.insert(
+                    name.clone(),
+                    "alias_of points at an unknown provider".into(),
+                );
                 continue;
             };
             match provider::build(name, def, client.clone()) {
@@ -110,7 +113,14 @@ impl Router {
             }
         }
         let limiter = AdaptiveLimiter::new(cfg.settings.max_concurrent_calls);
-        Ok(Self { cfg, providers, unavailable, cooldowns: Mutex::new(HashMap::new()), limiter, store })
+        Ok(Self {
+            cfg,
+            providers,
+            unavailable,
+            cooldowns: Mutex::new(HashMap::new()),
+            limiter,
+            store,
+        })
     }
 
     /// Replace or add a provider (tests, or a custom front end registering its own).
@@ -139,32 +149,51 @@ impl Router {
 
     fn ladder(&self, req: &RouteRequest) -> Result<(String, Vec<RouteEntry>), String> {
         if let Some((p, m)) = &req.pin {
-            let model = m.clone().or_else(|| self.cfg.provider(p).and_then(|d| d.default_model.clone()));
-            let tier = self.find_entry(p, model.as_deref()).map(|e| e.tier).unwrap_or_default();
-            let mut e = self.find_entry(p, model.as_deref()).cloned().unwrap_or(RouteEntry {
-                provider: p.clone(),
-                model: None,
-                tier,
-                daily_requests: None,
-                window_utc: None,
-                price_in: 0.0,
-                price_out: 0.0,
-                context_window: None,
-                max_output: None,
-            });
+            let model = m
+                .clone()
+                .or_else(|| self.cfg.provider(p).and_then(|d| d.default_model.clone()));
+            let tier = self
+                .find_entry(p, model.as_deref())
+                .map(|e| e.tier)
+                .unwrap_or_default();
+            let mut e = self
+                .find_entry(p, model.as_deref())
+                .cloned()
+                .unwrap_or(RouteEntry {
+                    provider: p.clone(),
+                    model: None,
+                    tier,
+                    daily_requests: None,
+                    window_utc: None,
+                    price_in: 0.0,
+                    price_out: 0.0,
+                    context_window: None,
+                    max_output: None,
+                });
             e.model = model;
             return Ok((format!("pin:{p}"), vec![e]));
         }
-        let name = req.route.clone().unwrap_or_else(|| self.cfg.settings.default_route_name());
+        let name = req
+            .route
+            .clone()
+            .unwrap_or_else(|| self.cfg.settings.default_route_name());
         match self.cfg.settings.routes.get(&name) {
             Some(l) if !l.is_empty() => Ok((name, l.clone())),
-            _ => Err(format!("unknown or empty route '{name}'. Known routes: {}", self.route_names().join(", "))),
+            _ => Err(format!(
+                "unknown or empty route '{name}'. Known routes: {}",
+                self.route_names().join(", ")
+            )),
         }
     }
 
     /// Find a configured rung for this provider/model in any route (for its prices and tier).
     pub fn find_entry(&self, provider: &str, model: Option<&str>) -> Option<&RouteEntry> {
-        self.cfg.settings.routes.values().flatten().find(|e| e.provider == provider && (model.is_none() || e.model.as_deref() == model))
+        self.cfg
+            .settings
+            .routes
+            .values()
+            .flatten()
+            .find(|e| e.provider == provider && (model.is_none() || e.model.as_deref() == model))
     }
 
     /// Which route contains a rung with this model name (OpenAI-style `model` → route resolution).
@@ -189,9 +218,24 @@ impl Router {
             .iter()
             .enumerate()
             .map(|(i, e)| {
-                let model =
-                    e.model.clone().or_else(|| self.cfg.provider(&e.provider).and_then(|d| d.default_model.clone())).unwrap_or_default();
-                let reason = self.ineligible_reason(e, &model, est_in, out_cap, spend, req.max_tier, now_utc);
+                let model = e
+                    .model
+                    .clone()
+                    .or_else(|| {
+                        self.cfg
+                            .provider(&e.provider)
+                            .and_then(|d| d.default_model.clone())
+                    })
+                    .unwrap_or_default();
+                let reason = self.ineligible_reason(
+                    e,
+                    &model,
+                    est_in,
+                    out_cap,
+                    spend,
+                    req.max_tier,
+                    now_utc,
+                );
                 PlanStep {
                     rung: i,
                     provider: e.provider.clone(),
@@ -233,10 +277,18 @@ impl Router {
                 return Some(format!("tier {} above max {}", e.tier.as_str(), t.as_str()));
             }
         }
-        if let Some(until) = self.cooldowns.lock().unwrap().get(&(e.provider.clone(), model.to_string())) {
+        if let Some(until) = self
+            .cooldowns
+            .lock()
+            .unwrap()
+            .get(&(e.provider.clone(), model.to_string()))
+        {
             let now = Instant::now();
             if *until > now {
-                return Some(format!("cooling down after 429 ({}s left)", (*until - now).as_secs()));
+                return Some(format!(
+                    "cooling down after 429 ({}s left)",
+                    (*until - now).as_secs()
+                ));
             }
         }
         if let Some(w) = &e.window_utc {
@@ -255,22 +307,34 @@ impl Router {
         if e.price_in > 0.0 || e.price_out > 0.0 {
             if let Some(budget) = self.cfg.settings.budget.daily_usd {
                 if spend >= budget {
-                    return Some(format!("daily budget reached (${spend:.2} of ${budget:.2})"));
+                    return Some(format!(
+                        "daily budget reached (${spend:.2} of ${budget:.2})"
+                    ));
                 }
             }
         }
         if let Some(ctx) = e.context_window {
             if est_in + out_cap > ctx {
-                return Some(format!("~{est_in} input + {out_cap} output tokens exceeds context window {ctx}"));
+                return Some(format!(
+                    "~{est_in} input + {out_cap} output tokens exceeds context window {ctx}"
+                ));
             }
         }
         None
     }
 
     pub async fn complete(&self, req: RouteRequest) -> Result<Routed, RouteFailure> {
-        let (route, plan) = self.plan(&req).map_err(|m| RouteFailure { message: m, plan: vec![], attempts: vec![] })?;
+        let (route, plan) = self.plan(&req).map_err(|m| RouteFailure {
+            message: m,
+            plan: vec![],
+            attempts: vec![],
+        })?;
         let s = &self.cfg.settings;
-        let prompt_text: String = req.messages.iter().map(|m| format!("[{}]\n{}\n", m.role, m.content)).collect();
+        let prompt_text: String = req
+            .messages
+            .iter()
+            .map(|m| format!("[{}]\n{}\n", m.role, m.content))
+            .collect();
         let prompt_sha = hex::encode(Sha256::digest(prompt_text.as_bytes()));
         let mut attempts = Vec::new();
 
@@ -278,10 +342,18 @@ impl Router {
         let cache_key = cache_key(&route, &req, s.output_token_cap, s.temperature);
         if use_cache {
             if let Ok(Some(hit)) = self.store.cache_get(&cache_key) {
-                let tier = hit.tier.as_deref().and_then(|t| serde_json::from_value(serde_json::json!(t)).ok()).unwrap_or_default();
+                let tier = hit
+                    .tier
+                    .as_deref()
+                    .and_then(|t| serde_json::from_value(serde_json::json!(t)).ok())
+                    .unwrap_or_default();
                 let t = now();
                 let rec = CallRecord {
-                    task: if req.task.is_empty() { "adhoc".into() } else { req.task.clone() },
+                    task: if req.task.is_empty() {
+                        "adhoc".into()
+                    } else {
+                        req.task.clone()
+                    },
                     doc_id: req.doc_id.clone(),
                     route: Some(route.clone()),
                     provider: hit.provider.clone(),
@@ -319,9 +391,14 @@ impl Router {
         }
 
         for step in plan.iter().filter(|p| p.eligible) {
-            let Some(provider) = self.providers.get(&step.provider).cloned() else { continue };
+            let Some(provider) = self.providers.get(&step.provider).cloned() else {
+                continue;
+            };
             let entry = self.find_entry(&step.provider, Some(&step.model)).cloned();
-            let (price_in, price_out) = entry.as_ref().map(|e| (e.price_in, e.price_out)).unwrap_or((0.0, 0.0));
+            let (price_in, price_out) = entry
+                .as_ref()
+                .map(|e| (e.price_in, e.price_out))
+                .unwrap_or((0.0, 0.0));
             let mut max_tokens = req.max_tokens.unwrap_or(s.output_token_cap);
             if let Some(m) = entry.as_ref().and_then(|e| e.max_output) {
                 max_tokens = max_tokens.min(m);
@@ -345,7 +422,11 @@ impl Router {
                 self.limiter.record(result.is_ok());
 
                 let mut rec = CallRecord {
-                    task: if req.task.is_empty() { "adhoc".into() } else { req.task.clone() },
+                    task: if req.task.is_empty() {
+                        "adhoc".into()
+                    } else {
+                        req.task.clone()
+                    },
                     doc_id: req.doc_id.clone(),
                     route: Some(route.clone()),
                     provider: step.provider.clone(),
@@ -363,7 +444,9 @@ impl Router {
 
                 match result {
                     Ok(reply) => {
-                        let cost = (reply.prompt_tokens as f64 * price_in + reply.completion_tokens as f64 * price_out) / 1e6;
+                        let cost = (reply.prompt_tokens as f64 * price_in
+                            + reply.completion_tokens as f64 * price_out)
+                            / 1e6;
                         rec.status = "SUCCESS".into();
                         rec.prompt_tokens = reply.prompt_tokens;
                         rec.completion_tokens = reply.completion_tokens;
@@ -430,7 +513,10 @@ impl Router {
                         let mut wait = None;
                         if let LlmError::RateLimited { retry_after, .. } = &err {
                             let cool = retry_after.unwrap_or(Duration::from_secs(60));
-                            self.cooldowns.lock().unwrap().insert((step.provider.clone(), step.model.clone()), Instant::now() + cool);
+                            self.cooldowns.lock().unwrap().insert(
+                                (step.provider.clone(), step.model.clone()),
+                                Instant::now() + cool,
+                            );
                             if s.retry.cascade_on_429 {
                                 break;
                             }
@@ -439,7 +525,10 @@ impl Router {
                         if !err.retryable() || attempt == s.retry.attempts.max(1) {
                             break;
                         }
-                        tokio::time::sleep(wait.unwrap_or_else(|| backoff(attempt, s.retry.base_seconds, s.retry.max_seconds))).await;
+                        tokio::time::sleep(wait.unwrap_or_else(|| {
+                            backoff(attempt, s.retry.base_seconds, s.retry.max_seconds)
+                        }))
+                        .await;
                     }
                 }
             }
@@ -450,10 +539,17 @@ impl Router {
         } else {
             format!(
                 "route '{route}': no eligible rung ({})",
-                plan.iter().map(|p| format!("{}: {}", p.provider, p.reason)).collect::<Vec<_>>().join("; ")
+                plan.iter()
+                    .map(|p| format!("{}: {}", p.provider, p.reason))
+                    .collect::<Vec<_>>()
+                    .join("; ")
             )
         };
-        Err(RouteFailure { message, plan, attempts })
+        Err(RouteFailure {
+            message,
+            plan,
+            attempts,
+        })
     }
 }
 
@@ -474,7 +570,10 @@ impl Router {
         let write = || -> std::io::Result<()> {
             use std::io::Write;
             std::fs::create_dir_all(&self.cfg.paths.logs_dir)?;
-            let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
+            let mut f = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)?;
             writeln!(f, "{line}")
         };
         if let Err(e) = write() {
@@ -514,7 +613,11 @@ pub fn in_window(spec: &str, now: chrono::DateTime<chrono::Utc>) -> Option<bool>
     let (a, b) = spec.split_once('-')?;
     let (start, end) = (parse(a)?, parse(b)?);
     let t = now.hour() * 60 + now.minute();
-    Some(if start <= end { t >= start && t < end } else { t >= start || t < end })
+    Some(if start <= end {
+        t >= start && t < end
+    } else {
+        t >= start || t < end
+    })
 }
 
 #[cfg(test)]
@@ -537,7 +640,11 @@ mod tests {
                              {"provider":"b","model":"paid-1","tier":"premium","price_in":1000000,"price_out":0}]}}"#;
 
     fn ask(text: &str) -> RouteRequest {
-        RouteRequest { messages: vec![Message::user(text)], task: "test".into(), ..Default::default() }
+        RouteRequest {
+            messages: vec![Message::user(text)],
+            task: "test".into(),
+            ..Default::default()
+        }
     }
 
     #[tokio::test]
@@ -545,7 +652,13 @@ mod tests {
         let mut r = router(LADDER);
         r.insert_provider(
             "a",
-            Arc::new(MockProvider::scripted("a", vec![Err(LlmError::RateLimited { retry_after: None, body: "slow down".into() })])),
+            Arc::new(MockProvider::scripted(
+                "a",
+                vec![Err(LlmError::RateLimited {
+                    retry_after: None,
+                    body: "slow down".into(),
+                })],
+            )),
         );
         let out = r.complete(ask("hi")).await.unwrap();
         assert_eq!(out.provider, "b");
@@ -565,16 +678,36 @@ mod tests {
             "a",
             Arc::new(MockProvider::scripted(
                 "a",
-                vec![Err(LlmError::Server { status: 503, body: String::new() }), MockProvider::ok("fine")],
+                vec![
+                    Err(LlmError::Server {
+                        status: 503,
+                        body: String::new(),
+                    }),
+                    MockProvider::ok("fine"),
+                ],
             )),
         );
         let out = r.complete(ask("hi")).await.unwrap();
-        assert_eq!((out.provider.as_str(), out.reply.text.as_str()), ("a", "fine"));
+        assert_eq!(
+            (out.provider.as_str(), out.reply.text.as_str()),
+            ("a", "fine")
+        );
 
         let mut r = router(LADDER);
-        r.insert_provider("a", Arc::new(MockProvider::scripted("a", vec![Err(LlmError::Truncated { completion_tokens: 8000 })])));
+        r.insert_provider(
+            "a",
+            Arc::new(MockProvider::scripted(
+                "a",
+                vec![Err(LlmError::Truncated {
+                    completion_tokens: 8000,
+                })],
+            )),
+        );
         let out = r.complete(ask("hi")).await.unwrap();
-        assert_eq!(out.provider, "b", "a truncated reply must cascade, never be returned");
+        assert_eq!(
+            out.provider, "b",
+            "a truncated reply must cascade, never be returned"
+        );
     }
 
     #[tokio::test]
@@ -583,7 +716,10 @@ mod tests {
         let (_, plan) = r.plan(&ask("x")).unwrap();
         assert!(plan[2].reason.starts_with("daily budget reached"));
         let r = router(LADDER);
-        let req = RouteRequest { max_tier: Some(Tier::Free), ..ask("x") };
+        let req = RouteRequest {
+            max_tier: Some(Tier::Free),
+            ..ask("x")
+        };
         let (_, plan) = r.plan(&req).unwrap();
         assert!(plan[2].reason.contains("above max"));
     }
@@ -591,8 +727,26 @@ mod tests {
     #[tokio::test]
     async fn exhausted_route_reports_every_reason() {
         let mut r = router(LADDER);
-        r.insert_provider("a", Arc::new(MockProvider::scripted("a", vec![Err(LlmError::Auth { status: 401, body: String::new() })])));
-        r.insert_provider("b", Arc::new(MockProvider::scripted("b", vec![Err(LlmError::BadRequest { status: 400, body: String::new() })])));
+        r.insert_provider(
+            "a",
+            Arc::new(MockProvider::scripted(
+                "a",
+                vec![Err(LlmError::Auth {
+                    status: 401,
+                    body: String::new(),
+                })],
+            )),
+        );
+        r.insert_provider(
+            "b",
+            Arc::new(MockProvider::scripted(
+                "b",
+                vec![Err(LlmError::BadRequest {
+                    status: 400,
+                    body: String::new(),
+                })],
+            )),
+        );
         let err = r.complete(ask("x")).await.unwrap_err();
         assert_eq!(err.attempts.len(), 2);
         assert!(err.message.contains("every eligible rung failed"));
@@ -600,13 +754,23 @@ mod tests {
 
     #[tokio::test]
     async fn identical_requests_are_served_from_cache_unless_no_cache() {
-        let r = router(r#"{"routes":{"default":[{"provider":"a","model":"m","price_in":1000000}]}}"#);
+        let r =
+            router(r#"{"routes":{"default":[{"provider":"a","model":"m","price_in":1000000}]}}"#);
         let first = r.complete(ask("same question")).await.unwrap();
         assert!(!first.cached && first.cost_usd > 0.0);
         let second = r.complete(ask("same question")).await.unwrap();
         assert!(second.cached);
-        assert_eq!((second.reply.text.as_str(), second.cost_usd), (first.reply.text.as_str(), 0.0));
-        let fresh = r.complete(RouteRequest { no_cache: true, ..ask("same question") }).await.unwrap();
+        assert_eq!(
+            (second.reply.text.as_str(), second.cost_usd),
+            (first.reply.text.as_str(), 0.0)
+        );
+        let fresh = r
+            .complete(RouteRequest {
+                no_cache: true,
+                ..ask("same question")
+            })
+            .await
+            .unwrap();
         assert!(!fresh.cached);
         // Cache hits don't use up a free tier's daily quota.
         assert_eq!(r.store.requests_today("a", "m").unwrap(), 2);

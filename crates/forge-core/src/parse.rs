@@ -35,8 +35,14 @@ mod tests {
 
     #[test]
     fn finds_json_in_common_reply_shapes() {
-        assert_eq!(extract_json("```json\n{\"a\":1}\n```").unwrap(), serde_json::json!({"a":1}));
-        assert_eq!(extract_json("Sure! {\"a\":[1,2]} hope this helps").unwrap(), serde_json::json!({"a":[1,2]}));
+        assert_eq!(
+            extract_json("```json\n{\"a\":1}\n```").unwrap(),
+            serde_json::json!({"a":1})
+        );
+        assert_eq!(
+            extract_json("Sure! {\"a\":[1,2]} hope this helps").unwrap(),
+            serde_json::json!({"a":[1,2]})
+        );
         assert_eq!(extract_json("[1, 2]").unwrap(), serde_json::json!([1, 2]));
         assert!(extract_json("no json here").is_none());
     }

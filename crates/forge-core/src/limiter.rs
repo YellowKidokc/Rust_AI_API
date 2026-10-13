@@ -45,7 +45,12 @@ impl AdaptiveLimiter {
             max,
             window,
             recover_after,
-            state: Mutex::new(State { ceiling: max, in_flight: 0, events: VecDeque::new(), last_change: Instant::now() }),
+            state: Mutex::new(State {
+                ceiling: max,
+                in_flight: 0,
+                events: VecDeque::new(),
+                last_change: Instant::now(),
+            }),
             notify: Notify::new(),
         })
     }
@@ -67,7 +72,9 @@ impl AdaptiveLimiter {
                 let mut s = self.state.lock().unwrap();
                 if s.in_flight < s.ceiling {
                     s.in_flight += 1;
-                    return Permit { limiter: Arc::clone(self) };
+                    return Permit {
+                        limiter: Arc::clone(self),
+                    };
                 }
             }
             notified.await;
@@ -78,7 +85,11 @@ impl AdaptiveLimiter {
         let now = Instant::now();
         let mut s = self.state.lock().unwrap();
         s.events.push_back((now, ok));
-        while s.events.front().is_some_and(|(t, _)| now.duration_since(*t) > self.window) {
+        while s
+            .events
+            .front()
+            .is_some_and(|(t, _)| now.duration_since(*t) > self.window)
+        {
             s.events.pop_front();
         }
         let total = s.events.len();
@@ -86,7 +97,10 @@ impl AdaptiveLimiter {
         if total >= 10 && failed * 10 > total {
             let new = (s.ceiling / 2).max(1);
             if new != s.ceiling {
-                tracing::warn!("limiter: {failed}/{total} failures in window, ceiling {} -> {new}", s.ceiling);
+                tracing::warn!(
+                    "limiter: {failed}/{total} failures in window, ceiling {} -> {new}",
+                    s.ceiling
+                );
             }
             s.ceiling = new;
             s.events.clear();
@@ -107,7 +121,8 @@ mod tests {
 
     #[tokio::test]
     async fn halves_on_failures_and_recovers() {
-        let l = AdaptiveLimiter::with_timing(30, Duration::from_secs(60), Duration::from_millis(30));
+        let l =
+            AdaptiveLimiter::with_timing(30, Duration::from_secs(60), Duration::from_millis(30));
         for i in 0..10 {
             l.record(i % 4 != 0); // 3 of 10 fail
         }

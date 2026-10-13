@@ -31,9 +31,14 @@ type S = State<Arc<Forge>>;
 pub fn app(forge: Arc<Forge>) -> Http {
     let extra: Vec<String> = forge.config.settings.server.cors_origins.clone();
     let cors = CorsLayer::new()
-        .allow_origin(AllowOrigin::predicate(move |origin: &HeaderValue, _| origin_ok(origin, &extra)))
+        .allow_origin(AllowOrigin::predicate(move |origin: &HeaderValue, _| {
+            origin_ok(origin, &extra)
+        }))
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
-        .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION]);
+        .allow_headers([
+            axum::http::header::CONTENT_TYPE,
+            axum::http::header::AUTHORIZATION,
+        ]);
 
     Http::new()
         .route("/health", get(health))
@@ -59,7 +64,10 @@ fn origin_ok(origin: &HeaderValue, extra: &[String]) -> bool {
         return true;
     }
     for local in ["http://127.0.0.1", "http://localhost", "http://[::1]"] {
-        if o == local || o.strip_prefix(local).is_some_and(|rest| rest.starts_with(':')) {
+        if o == local
+            || o.strip_prefix(local)
+                .is_some_and(|rest| rest.starts_with(':'))
+        {
             return true;
         }
     }
@@ -72,7 +80,10 @@ pub async fn serve(forge: Arc<Forge>, host: &str, port: u16) -> anyhow::Result<(
         .await
         .map_err(|e| anyhow::anyhow!("cannot bind {addr}: {e}. Is another engine already on that port? Use --port to pick another."))?;
     eprintln!("forge gateway on http://{addr}  (db: {})", forge.store.path);
-    eprintln!("  OpenAI-compatible: http://{addr}/v1/chat/completions   routes: {}", forge.router.route_names().join(", "));
+    eprintln!(
+        "  OpenAI-compatible: http://{addr}/v1/chat/completions   routes: {}",
+        forge.router.route_names().join(", ")
+    );
     axum::serve(listener, app(forge)).await?;
     Ok(())
 }
@@ -97,14 +108,22 @@ impl From<RouteFailure> for ApiError {
 impl From<CanonError> for ApiError {
     fn from(e: CanonError) -> Self {
         match e {
-            CanonError::Invalid(m) => ApiError(StatusCode::UNPROCESSABLE_ENTITY, json!({"error": m})),
-            CanonError::Db(e) => ApiError(StatusCode::INTERNAL_SERVER_ERROR, json!({"error": e.to_string()})),
+            CanonError::Invalid(m) => {
+                ApiError(StatusCode::UNPROCESSABLE_ENTITY, json!({"error": m}))
+            }
+            CanonError::Db(e) => ApiError(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({"error": e.to_string()}),
+            ),
         }
     }
 }
 
 fn internal(e: impl std::fmt::Display) -> ApiError {
-    ApiError(StatusCode::INTERNAL_SERVER_ERROR, json!({"error": e.to_string()}))
+    ApiError(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        json!({"error": e.to_string()}),
+    )
 }
 
 async fn health(State(f): S) -> Json<Value> {
@@ -121,7 +140,12 @@ async fn health(State(f): S) -> Json<Value> {
 }
 
 async fn models(State(f): S) -> Json<Value> {
-    let data: Vec<Value> = f.router.route_names().into_iter().map(|r| json!({"id": r, "object": "model", "owned_by": "forge"})).collect();
+    let data: Vec<Value> = f
+        .router
+        .route_names()
+        .into_iter()
+        .map(|r| json!({"id": r, "object": "model", "owned_by": "forge"}))
+        .collect();
     Json(json!({"object": "list", "data": data}))
 }
 
@@ -145,7 +169,10 @@ type Resolved = (Option<String>, Option<(String, Option<String>)>);
 
 /// `model` is a route name, `auto`/empty (default route), or a model listed in some route (pinned).
 fn resolve_model(f: &Forge, model: Option<&str>) -> Result<Resolved, ApiError> {
-    match model.map(str::trim).filter(|m| !m.is_empty() && *m != "auto" && *m != "forge") {
+    match model
+        .map(str::trim)
+        .filter(|m| !m.is_empty() && *m != "auto" && *m != "forge")
+    {
         None => Ok((None, None)),
         Some(m) => {
             let m = m.strip_prefix("forge/").unwrap_or(m);
@@ -171,7 +198,8 @@ async fn chat_completions(State(f): S, Json(b): Json<ChatBody>) -> Result<Json<V
         ));
     }
     let (route, pin) = resolve_model(&f, b.model.as_deref())?;
-    let json_mode = b.response_format.as_ref().and_then(|r| r["type"].as_str()) == Some("json_object");
+    let json_mode =
+        b.response_format.as_ref().and_then(|r| r["type"].as_str()) == Some("json_object");
     let r = f
         .router
         .complete(RouteRequest {
@@ -246,10 +274,17 @@ async fn audit(State(f): S, Json(b): Json<Value>) -> Result<Json<Value>, ApiErro
 
 async fn candidate(State(f): S, body: axum::body::Bytes) -> Result<Response, ApiError> {
     let input: CandidateInput = serde_json::from_slice(&body).map_err(|e| {
-        ApiError(StatusCode::UNPROCESSABLE_ENTITY, json!({"error": format!("candidate rejected: {e}. Put extra fields inside `atom`.")}))
+        ApiError(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            json!({"error": format!("candidate rejected: {e}. Put extra fields inside `atom`.")}),
+        )
     })?;
     let receipt = canon::stage(&f.store, input)?;
-    let status = if receipt.deduplicated { StatusCode::OK } else { StatusCode::CREATED };
+    let status = if receipt.deduplicated {
+        StatusCode::OK
+    } else {
+        StatusCode::CREATED
+    };
     Ok((status, Json(json!(receipt))).into_response())
 }
 
@@ -268,21 +303,36 @@ struct SearchQ {
 }
 
 async fn search(State(f): S, Query(q): Query<SearchQ>) -> Result<Json<Value>, ApiError> {
-    Ok(Json(json!({"results": canon::search(&f.store, q.q.trim(), q.limit.unwrap_or(10).min(200))?})))
+    Ok(Json(
+        json!({"results": canon::search(&f.store, q.q.trim(), q.limit.unwrap_or(10).min(200))?}),
+    ))
 }
 
 async fn agenda(State(f): S, Query(q): Query<SearchQ>) -> Result<Json<Value>, ApiError> {
-    Ok(Json(json!({"items": canon::agenda(&f.store, q.limit.unwrap_or(50).min(500))?})))
+    Ok(Json(
+        json!({"items": canon::agenda(&f.store, q.limit.unwrap_or(50).min(500))?}),
+    ))
 }
 
 async fn plan(State(f): S, Query(q): Query<SearchQ>) -> Result<Json<Value>, ApiError> {
-    let req = RouteRequest { route: q.route, messages: vec![Message::user(q.q)], ..Default::default() };
-    let (route, steps) = f.router.plan(&req).map_err(|m| ApiError(StatusCode::BAD_REQUEST, json!({"error": m})))?;
-    Ok(Json(json!({"route": route, "steps": steps, "limiter_ceiling": f.router.limiter.ceiling()})))
+    let req = RouteRequest {
+        route: q.route,
+        messages: vec![Message::user(q.q)],
+        ..Default::default()
+    };
+    let (route, steps) = f
+        .router
+        .plan(&req)
+        .map_err(|m| ApiError(StatusCode::BAD_REQUEST, json!({"error": m})))?;
+    Ok(Json(
+        json!({"route": route, "steps": steps, "limiter_ceiling": f.router.limiter.ceiling()}),
+    ))
 }
 
 async fn ledger_recent(State(f): S, Query(q): Query<SearchQ>) -> Result<Json<Value>, ApiError> {
-    Ok(Json(json!({"calls": f.store.recent_calls(q.limit.unwrap_or(20).min(500)).map_err(internal)?})))
+    Ok(Json(
+        json!({"calls": f.store.recent_calls(q.limit.unwrap_or(20).min(500)).map_err(internal)?}),
+    ))
 }
 
 async fn ledger_stats(State(f): S, Query(q): Query<SearchQ>) -> Result<Json<Value>, ApiError> {
@@ -293,7 +343,14 @@ async fn ledger_stats(State(f): S, Query(q): Query<SearchQ>) -> Result<Json<Valu
 }
 
 async fn context_search(State(f): S, Query(q): Query<SearchQ>) -> Result<Json<Value>, ApiError> {
-    let hits = f.store.context_search(&q.q, q.limit.unwrap_or(5).min(50) as usize, q.kind.as_deref()).map_err(internal)?;
+    let hits = f
+        .store
+        .context_search(
+            &q.q,
+            q.limit.unwrap_or(5).min(50) as usize,
+            q.kind.as_deref(),
+        )
+        .map_err(internal)?;
     Ok(Json(json!({"hits": hits})))
 }
 
@@ -307,7 +364,13 @@ mod tests {
     use tower::ServiceExt;
 
     fn forge() -> Arc<Forge> {
-        let mut cfg = Config::from_strings(DEFAULT_PROVIDERS, DEFAULT_SETTINGS, std::path::PathBuf::from("."), None).unwrap();
+        let mut cfg = Config::from_strings(
+            DEFAULT_PROVIDERS,
+            DEFAULT_SETTINGS,
+            std::path::PathBuf::from("."),
+            None,
+        )
+        .unwrap();
         cfg.settings.default_route = Some("test".into());
         Forge::with_store(cfg, forge_core::Store::open_memory().unwrap()).unwrap()
     }
@@ -317,11 +380,19 @@ mod tests {
         let status = resp.status();
         let headers = resp.headers().clone();
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
-        (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null), headers)
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+            headers,
+        )
     }
 
     fn post(uri: &str, body: Value) -> Request<Body> {
-        Request::post(uri).header("content-type", "application/json").header("origin", "null").body(Body::from(body.to_string())).unwrap()
+        Request::post(uri)
+            .header("content-type", "application/json")
+            .header("origin", "null")
+            .body(Body::from(body.to_string()))
+            .unwrap()
     }
 
     #[tokio::test]
@@ -329,26 +400,48 @@ mod tests {
         let f = forge();
         let (s, v, h) = call(
             app(f.clone()),
-            post("/v1/chat/completions", json!({"model": "test", "messages": [{"role": "user", "content": "hello"}]})),
+            post(
+                "/v1/chat/completions",
+                json!({"model": "test", "messages": [{"role": "user", "content": "hello"}]}),
+            ),
         )
         .await;
         assert_eq!(s, StatusCode::OK, "{v}");
-        assert!(v["choices"][0]["message"]["content"].as_str().unwrap().starts_with("[mock:mock-1]"));
+        assert!(v["choices"][0]["message"]["content"]
+            .as_str()
+            .unwrap()
+            .starts_with("[mock:mock-1]"));
         assert_eq!(v["forge"]["provider"], "mock");
         assert_eq!(h.get("access-control-allow-origin").unwrap(), "null");
         assert_eq!(f.store.recent_calls(5).unwrap().len(), 1);
-        let (s, _, _) = call(app(f), post("/v1/chat/completions", json!({"model": "nope", "messages": []}))).await;
+        let (s, _, _) = call(
+            app(f),
+            post(
+                "/v1/chat/completions",
+                json!({"model": "nope", "messages": []}),
+            ),
+        )
+        .await;
         assert_eq!(s, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
     async fn foreign_origins_get_no_cors_grant() {
-        let req = Request::get("/health").header("origin", "https://evil.example").body(Body::empty()).unwrap();
+        let req = Request::get("/health")
+            .header("origin", "https://evil.example")
+            .body(Body::empty())
+            .unwrap();
         let (s, _, h) = call(app(forge()), req).await;
         assert_eq!(s, StatusCode::OK);
         assert!(h.get("access-control-allow-origin").is_none());
-        assert!(origin_ok(&HeaderValue::from_static("http://localhost:5173"), &[]));
-        assert!(!origin_ok(&HeaderValue::from_static("http://localhost.evil.com"), &[]));
+        assert!(origin_ok(
+            &HeaderValue::from_static("http://localhost:5173"),
+            &[]
+        ));
+        assert!(!origin_ok(
+            &HeaderValue::from_static("http://localhost.evil.com"),
+            &[]
+        ));
     }
 
     #[tokio::test]
@@ -359,13 +452,30 @@ mod tests {
         assert_eq!(s, StatusCode::CREATED, "{r}");
         assert_eq!(r["note"], "accepted and staged. this is not canon.");
         let (s, r2, _) = call(app(f.clone()), post("/candidate", body)).await;
-        assert_eq!((s, r2["candidate_id"].clone()), (StatusCode::OK, r["candidate_id"].clone()));
-        let (s, e, _) = call(app(f.clone()), post("/candidate", json!({"atom": {}, "reconciliation": []}))).await;
+        assert_eq!(
+            (s, r2["candidate_id"].clone()),
+            (StatusCode::OK, r["candidate_id"].clone())
+        );
+        let (s, e, _) = call(
+            app(f.clone()),
+            post("/candidate", json!({"atom": {}, "reconciliation": []})),
+        )
+        .await;
         assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY);
         assert!(e["error"].as_str().unwrap().contains("reconciliation"));
-        let (_, found, _) = call(app(f.clone()), Request::get("/search?q=A042&limit=5").body(Body::empty()).unwrap()).await;
+        let (_, found, _) = call(
+            app(f.clone()),
+            Request::get("/search?q=A042&limit=5")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
         assert_eq!(found["results"][0]["payload"]["register"], "THEOLOGICAL");
-        let (_, gen, _) = call(app(f), post("/api/generate", json!({"prompt": "x", "system": "y"}))).await;
+        let (_, gen, _) = call(
+            app(f),
+            post("/api/generate", json!({"prompt": "x", "system": "y"})),
+        )
+        .await;
         assert_eq!(gen["provider"], "mock");
     }
 }

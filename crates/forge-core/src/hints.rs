@@ -27,7 +27,12 @@ pub struct NoteHints {
 pub fn read(note: &str) -> NoteHints {
     let mut out = NoteHints::default();
     let note = note.strip_prefix('\u{feff}').unwrap_or(note);
-    let Some(rest) = note.strip_prefix("---\n").or_else(|| note.strip_prefix("---\r\n")) else { return out };
+    let Some(rest) = note
+        .strip_prefix("---\n")
+        .or_else(|| note.strip_prefix("---\r\n"))
+    else {
+        return out;
+    };
     let mut current: Option<String> = None;
     for line in rest.lines() {
         if line.trim_end() == "---" {
@@ -43,7 +48,9 @@ pub fn read(note: &str) -> NoteHints {
         if line.starts_with(' ') || line.starts_with('\t') {
             continue;
         }
-        let Some((k, v)) = line.split_once(':') else { continue };
+        let Some((k, v)) = line.split_once(':') else {
+            continue;
+        };
         let key = k.trim().to_lowercase();
         let val = v.trim().trim_matches(|c| c == '"' || c == '\'');
         if key == "route" && !val.is_empty() {
@@ -57,7 +64,10 @@ pub fn read(note: &str) -> NoteHints {
 }
 
 fn push_words(words: &mut Vec<String>, value: &str) {
-    for w in value.split(|c: char| !(c.is_alphanumeric() || c == '-' || c == '_')).filter(|w| !w.is_empty()) {
+    for w in value
+        .split(|c: char| !(c.is_alphanumeric() || c == '-' || c == '_'))
+        .filter(|w| !w.is_empty())
+    {
         let w = w.to_lowercase();
         if !words.contains(&w) {
             words.push(w);
@@ -81,7 +91,13 @@ mod tests {
     use super::*;
 
     fn rules() -> Vec<RouteHint> {
-        [("deep", "reasoning"), ("draft", "free")].iter().map(|(w, r)| RouteHint { when: w.to_string(), route: r.to_string() }).collect()
+        [("deep", "reasoning"), ("draft", "free")]
+            .iter()
+            .map(|(w, r)| RouteHint {
+                when: w.to_string(),
+                route: r.to_string(),
+            })
+            .collect()
     }
 
     #[test]
@@ -96,6 +112,9 @@ mod tests {
     fn explicit_route_wins_and_no_front_matter_means_no_preference() {
         let h = read("---\nroute: premium\ntags: [draft]\n---\n");
         assert_eq!(resolve(&h, &rules()).unwrap().0, "premium");
-        assert_eq!(resolve(&read("# just a note\npriority: draft"), &rules()), None);
+        assert_eq!(
+            resolve(&read("# just a note\npriority: draft"), &rules()),
+            None
+        );
     }
 }

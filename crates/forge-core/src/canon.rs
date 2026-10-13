@@ -83,10 +83,16 @@ pub fn canonical_json(v: &Value) -> String {
         Value::Object(o) => {
             let mut keys: Vec<&String> = o.keys().collect();
             keys.sort();
-            let parts: Vec<String> = keys.iter().map(|k| format!("{}:{}", Value::String((*k).clone()), canonical_json(&o[*k]))).collect();
+            let parts: Vec<String> = keys
+                .iter()
+                .map(|k| format!("{}:{}", Value::String((*k).clone()), canonical_json(&o[*k])))
+                .collect();
             format!("{{{}}}", parts.join(","))
         }
-        Value::Array(a) => format!("[{}]", a.iter().map(canonical_json).collect::<Vec<_>>().join(",")),
+        Value::Array(a) => format!(
+            "[{}]",
+            a.iter().map(canonical_json).collect::<Vec<_>>().join(",")
+        ),
         other => other.to_string(),
     }
 }
@@ -95,7 +101,11 @@ pub fn canonical_json(v: &Value) -> String {
 pub fn checks(input: &CandidateInput) -> Vec<Reason> {
     let mut out = Vec::new();
     if let Some(atom) = &input.atom {
-        if atom.get("object_type").and_then(Value::as_str).is_none_or(str::is_empty) {
+        if atom
+            .get("object_type")
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty)
+        {
             out.push(Reason {
                 check_id: "OBJECT_TYPE_MISSING".into(),
                 trigger: "atom has no object_type".into(),
@@ -118,19 +128,32 @@ pub fn checks(input: &CandidateInput) -> Vec<Reason> {
 fn walk_lean(v: &Value, out: &mut Vec<Reason>) {
     match v {
         Value::Object(o) => {
-            let claimed = o.get("lean_state").and_then(Value::as_str).map(str::to_string).or_else(|| {
-                (o.get("axis").and_then(Value::as_str) == Some("lean_state"))
-                    .then(|| o.get("proposed").and_then(Value::as_str).unwrap_or("").to_string())
-            });
+            let claimed = o
+                .get("lean_state")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .or_else(|| {
+                    (o.get("axis").and_then(Value::as_str) == Some("lean_state")).then(|| {
+                        o.get("proposed")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_string()
+                    })
+                });
             if let Some(state) = claimed {
                 let up = state.to_uppercase();
-                let has_receipt =
-                    ["receipt_id", "lean_receipt"].iter().any(|k| o.get(*k).and_then(Value::as_str).is_some_and(|s| !s.trim().is_empty()));
+                let has_receipt = ["receipt_id", "lean_receipt"].iter().any(|k| {
+                    o.get(*k)
+                        .and_then(Value::as_str)
+                        .is_some_and(|s| !s.trim().is_empty())
+                });
                 if (up.contains("BUILT") || up.contains("ZERO_SORRY")) && !has_receipt {
                     out.push(Reason {
                         check_id: "LEAN_RECEIPT_MISSING".into(),
                         trigger: format!("lean_state '{state}' claimed without a receipt id"),
-                        smallest_fix: "Attach the build receipt id, or record the state as a specification.".into(),
+                        smallest_fix:
+                            "Attach the build receipt id, or record the state as a specification."
+                                .into(),
                     });
                 }
             }
@@ -144,7 +167,9 @@ fn walk_lean(v: &Value, out: &mut Vec<Reason>) {
 pub fn stage(store: &Store, input: CandidateInput) -> Result<Receipt, CanonError> {
     let has_text = input.text.as_deref().is_some_and(|t| !t.trim().is_empty());
     if !has_text && input.atom.is_none() {
-        return Err(CanonError::Invalid("a candidate needs `text` or `atom` (or both)".into()));
+        return Err(CanonError::Invalid(
+            "a candidate needs `text` or `atom` (or both)".into(),
+        ));
     }
     let hash = content_hash(input.text.as_deref(), input.atom.as_ref());
     let db = store.lock();
@@ -179,8 +204,16 @@ pub fn stage(store: &Store, input: CandidateInput) -> Result<Receipt, CanonError
     }
 
     let reasons = checks(&input);
-    let verdict = if reasons.is_empty() { "PASS" } else { "NEEDS_REVIEW" };
-    let candidate_id = format!("CAN-{}-{}", &hash[..10], &uuid::Uuid::new_v4().simple().to_string()[..6]);
+    let verdict = if reasons.is_empty() {
+        "PASS"
+    } else {
+        "NEEDS_REVIEW"
+    };
+    let candidate_id = format!(
+        "CAN-{}-{}",
+        &hash[..10],
+        &uuid::Uuid::new_v4().simple().to_string()[..6]
+    );
     let receipt_id = format!("RCPT-{}", uuid::Uuid::new_v4().simple());
     let t = now();
 
@@ -331,12 +364,16 @@ mod tests {
         let mut inner = serde_json::Map::new();
         inner.insert("z".into(), json!(1));
         inner.insert("a".into(), json!([{"y": 2, "b": 3}]));
-        assert_eq!(canonical_json(&Value::Object(inner)), r#"{"a":[{"b":3,"y":2}],"z":1}"#);
+        assert_eq!(
+            canonical_json(&Value::Object(inner)),
+            r#"{"a":[{"b":3,"y":2}],"z":1}"#
+        );
     }
 
     #[test]
     fn unknown_top_level_fields_are_rejected_not_dropped() {
-        let r: Result<CandidateInput, _> = serde_json::from_value(json!({"atom": {}, "reconciliation": []}));
+        let r: Result<CandidateInput, _> =
+            serde_json::from_value(json!({"atom": {}, "reconciliation": []}));
         assert!(r.unwrap_err().to_string().contains("reconciliation"));
     }
 
@@ -364,7 +401,11 @@ mod tests {
         assert_eq!(hits[0]["payload"]["object_type"], "CLAIM");
         let ag = agenda(&s, 50).unwrap();
         assert_eq!(ag[0]["kind"], "conflict");
-        assert!(ag[0]["affected"].as_array().unwrap().iter().any(|x| x == "A042"));
+        assert!(ag[0]["affected"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|x| x == "A042"));
     }
 
     #[test]

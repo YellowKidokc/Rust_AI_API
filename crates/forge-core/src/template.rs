@@ -24,7 +24,10 @@ use serde::Serialize;
 pub const BUILTIN: &[(&str, &str)] = &[
     ("default", include_str!("../../../templates/default.md")),
     ("summarize", include_str!("../../../templates/summarize.md")),
-    ("extract-claims", include_str!("../../../templates/extract-claims.md")),
+    (
+        "extract-claims",
+        include_str!("../../../templates/extract-claims.md"),
+    ),
 ];
 
 #[derive(Debug, Clone, Serialize)]
@@ -40,12 +43,22 @@ pub struct Template {
 
 impl Template {
     pub fn parse(name: &str, text: &str) -> Result<Self> {
-        let text = text.strip_prefix('\u{feff}').unwrap_or(text).replace("\r\n", "\n");
+        let text = text
+            .strip_prefix('\u{feff}')
+            .unwrap_or(text)
+            .replace("\r\n", "\n");
         let mut meta = BTreeMap::new();
         let body = if let Some(rest) = text.strip_prefix("---\n") {
-            let (head, body) = rest.split_once("\n---\n").ok_or_else(|| anyhow!("template {name}: front matter not closed"))?;
-            for line in head.lines().filter(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#')) {
-                let (k, v) = line.split_once(':').ok_or_else(|| anyhow!("template {name}: bad header line '{line}'"))?;
+            let (head, body) = rest
+                .split_once("\n---\n")
+                .ok_or_else(|| anyhow!("template {name}: front matter not closed"))?;
+            for line in head
+                .lines()
+                .filter(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#'))
+            {
+                let (k, v) = line
+                    .split_once(':')
+                    .ok_or_else(|| anyhow!("template {name}: bad header line '{line}'"))?;
                 meta.insert(k.trim().to_string(), v.trim().to_string());
             }
             body.to_string()
@@ -58,18 +71,24 @@ impl Template {
             json: meta.get("json").is_some_and(|v| v == "true"),
             system: meta.get("system").filter(|v| !v.is_empty()).cloned(),
             context_k: meta.get("context_k").and_then(|v| v.parse().ok()),
-            suffix: meta.get("suffix").cloned().unwrap_or_else(|| name.to_uppercase()),
+            suffix: meta
+                .get("suffix")
+                .cloned()
+                .unwrap_or_else(|| name.to_uppercase()),
             body,
         };
         // Compile once now so syntax errors surface at load time.
-        env().template_from_str(&t.body).with_context(|| format!("template {name}"))?;
+        env()
+            .template_from_str(&t.body)
+            .with_context(|| format!("template {name}"))?;
         Ok(t)
     }
 
     pub fn render<S: Serialize>(&self, vars: S) -> Result<String> {
         let env = env();
         let tpl = env.template_from_str(&self.body)?;
-        tpl.render(vars).with_context(|| format!("rendering template {}", self.name))
+        tpl.render(vars)
+            .with_context(|| format!("rendering template {}", self.name))
     }
 }
 
@@ -88,7 +107,10 @@ pub fn load(dir: &Path, name: &str) -> Result<Template> {
     }
     match BUILTIN.iter().find(|(n, _)| *n == name) {
         Some((_, text)) => Template::parse(name, text),
-        None => Err(anyhow!("no template '{name}' in {} and no built-in of that name", dir.display())),
+        None => Err(anyhow!(
+            "no template '{name}' in {} and no built-in of that name",
+            dir.display()
+        )),
     }
 }
 
@@ -123,7 +145,11 @@ mod tests {
 
     #[test]
     fn front_matter_and_strict_undefined() {
-        let t = Template::parse("x", "---\n# comment\nroute: free\njson: true\nsuffix: X\n---\nHi {{ name }}").unwrap();
+        let t = Template::parse(
+            "x",
+            "---\n# comment\nroute: free\njson: true\nsuffix: X\n---\nHi {{ name }}",
+        )
+        .unwrap();
         assert_eq!(t.route.as_deref(), Some("free"));
         assert!(t.json);
         assert_eq!(t.render(serde_json::json!({"name": "D"})).unwrap(), "Hi D");

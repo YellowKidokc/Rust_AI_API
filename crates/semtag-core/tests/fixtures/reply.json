@@ -1,0 +1,7 @@
+[
+  {"type": "Relationship", "label": "Grace ↔ entropy bridge", "parentLabel": "Grace lowers moral entropy", "confidence": 0.8,
+   "metadata": {"domain_a": "thermodynamics", "domain_b": "theology", "mapping": "W_grace as source term",
+     "constrains": true, "metaphor_kill_condition": "no measurable term", "vulnerabilities": ["sign of T"], "unlocks": "Law 5",
+     "identity": "bridge", "function": "connects", "support": "Law 5 doc", "temporal": "2026", "status": "draft", "lens": "physics", "origin": "model"}},
+  {"type": "Sentence", "label": "Grace acts as an external source term on moral entropy.", "confidence": 1.4}
+]

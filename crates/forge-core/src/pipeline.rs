@@ -62,13 +62,22 @@ pub fn collect(folder: &Path) -> Result<Vec<PathBuf>> {
     }
     let mut out = Vec::new();
     for dir in [folder.join("00_PRIORITY"), folder.to_path_buf()] {
-        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
         let mut batch: Vec<PathBuf> = rd
             .flatten()
             .map(|e| e.path())
             .filter(|p| p.is_file())
-            .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("md") || x.eq_ignore_ascii_case("txt")))
-            .filter(|p| !p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with('_') || n.starts_with('.')))
+            .filter(|p| {
+                p.extension()
+                    .is_some_and(|x| x.eq_ignore_ascii_case("md") || x.eq_ignore_ascii_case("txt"))
+            })
+            .filter(|p| {
+                !p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with('_') || n.starts_with('.'))
+            })
             .collect();
         batch.sort();
         out.extend(batch);
@@ -79,7 +88,10 @@ pub fn collect(folder: &Path) -> Result<Vec<PathBuf>> {
 /// Stable id: the file name. Two files with the same name in different folders share history on purpose
 /// (a note moved from INBOX to 00_PRIORITY is still the same note).
 pub fn doc_id(path: &Path) -> String {
-    path.file_name().and_then(|n| n.to_str()).unwrap_or("unnamed").to_string()
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unnamed")
+        .to_string()
 }
 
 fn source_hash(text: &str, tpl: &Template) -> String {
@@ -95,8 +107,9 @@ fn source_hash(text: &str, tpl: &Template) -> String {
 /// Most significant terms of a document, used as the context-library query.
 pub fn key_terms(text: &str, n: usize) -> String {
     const STOP: &[&str] = &[
-        "this", "that", "with", "from", "have", "were", "which", "their", "there", "these", "those", "would", "could", "should", "about",
-        "into", "than", "then", "them", "they", "what", "when", "where", "while", "will", "shall", "been", "being", "does", "also", "only",
+        "this", "that", "with", "from", "have", "were", "which", "their", "there", "these",
+        "those", "would", "could", "should", "about", "into", "than", "then", "them", "they",
+        "what", "when", "where", "while", "will", "shall", "been", "being", "does", "also", "only",
         "more", "most", "some", "such", "each", "other", "because", "between",
     ];
     let mut freq: std::collections::HashMap<String, usize> = Default::default();
@@ -112,14 +125,23 @@ pub fn key_terms(text: &str, n: usize) -> String {
     }
     let mut v: Vec<(String, usize)> = freq.into_iter().collect();
     v.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-    v.into_iter().take(n).map(|(w, _)| w).collect::<Vec<_>>().join(" ")
+    v.into_iter()
+        .take(n)
+        .map(|(w, _)| w)
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Render hits as a compact block, capped at `max_chars`.
 pub fn render_context(hits: &[ContextHit], max_chars: usize) -> String {
     let mut out = String::new();
     for h in hits {
-        let piece = format!("- [{}] {}: {}\n", h.kind, h.title, h.body.trim().replace('\n', " "));
+        let piece = format!(
+            "- [{}] {}: {}\n",
+            h.kind,
+            h.title,
+            h.body.trim().replace('\n', " ")
+        );
         if out.len() + piece.len() > max_chars {
             let room = max_chars.saturating_sub(out.len());
             if room > 80 {
@@ -152,7 +174,8 @@ fn shelve(target: &Path, outbox: &Path) -> Result<()> {
         let stamp = chrono::Local::now().format("%H%M%S%.3f").to_string();
         dest = dir.join(format!("{stamp} {}", name.to_string_lossy()));
     }
-    std::fs::rename(target, &dest).or_else(|_| std::fs::copy(target, &dest).and_then(|_| std::fs::remove_file(target)))?;
+    std::fs::rename(target, &dest)
+        .or_else(|_| std::fs::copy(target, &dest).and_then(|_| std::fs::remove_file(target)))?;
     Ok(())
 }
 
@@ -160,11 +183,16 @@ impl Forge {
     /// Build the prompt for one document.
     pub fn prepare(&self, path: &Path, job: &str) -> Result<Prepared> {
         let tpl = template::load(&self.config.paths.templates_dir, job)?;
-        let raw = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+        let raw =
+            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
         let text = raw.strip_prefix('\u{feff}').unwrap_or(&raw).to_string();
         let id = doc_id(path);
         let k = tpl.context_k.unwrap_or(self.config.settings.context.top_k);
-        let hits = if k > 0 { self.store.context_search(&key_terms(&text, 24), k, None)? } else { vec![] };
+        let hits = if k > 0 {
+            self.store.context_search(&key_terms(&text, 24), k, None)?
+        } else {
+            vec![]
+        };
         let context = render_context(&hits, self.config.settings.context.max_chars);
         let history = self
             .store
@@ -209,7 +237,13 @@ impl Forge {
             route: None,
             detail: None,
         };
-        let Prepared { template: tpl, messages, source_hash: hash, text_sha256, note_route } = match self.prepare(path, &opts.job) {
+        let Prepared {
+            template: tpl,
+            messages,
+            source_hash: hash,
+            text_sha256,
+            note_route,
+        } = match self.prepare(path, &opts.job) {
             Ok(x) => x,
             Err(e) => {
                 res.detail = Some(format!("{e:#}"));
@@ -218,7 +252,10 @@ impl Forge {
         };
         if !opts.redo {
             if let Ok(Some(d)) = self.store.doc_get(&id) {
-                if d.status == "DONE" && d.source_hash.as_deref() == Some(&hash) && d.job.as_deref() == Some(&opts.job) {
+                if d.status == "DONE"
+                    && d.source_hash.as_deref() == Some(&hash)
+                    && d.job.as_deref() == Some(&opts.job)
+                {
                     res.status = "SKIPPED".into();
                     res.detail = Some("unchanged since last run (use --redo to run again)".into());
                     return res;
@@ -232,10 +269,21 @@ impl Forge {
             (None, None, Some(r)) => (Some(r.clone()), format!("template {}", tpl.name)),
             (None, None, None) => (None, "default_route".to_string()),
         };
-        res.route = Some(format!("{} ({why})", route.clone().unwrap_or_else(|| self.config.settings.default_route_name())));
+        res.route = Some(format!(
+            "{} ({why})",
+            route
+                .clone()
+                .unwrap_or_else(|| self.config.settings.default_route_name())
+        ));
         if opts.dry_run {
             res.status = "DRY_RUN".into();
-            res.detail = Some(messages.iter().map(|m| format!("[{}]\n{}", m.role, m.content)).collect::<Vec<_>>().join("\n\n"));
+            res.detail = Some(
+                messages
+                    .iter()
+                    .map(|m| format!("[{}]\n{}", m.role, m.content))
+                    .collect::<Vec<_>>()
+                    .join("\n\n"),
+            );
             return res;
         }
         let req = RouteRequest {
@@ -253,10 +301,19 @@ impl Forge {
                 let mut body = r.reply.text.clone();
                 if tpl.json {
                     match crate::parse::extract_json(&body) {
-                        Some(v) => body = format!("```json\n{}\n```\n", serde_json::to_string_pretty(&v).unwrap_or(body)),
+                        Some(v) => {
+                            body = format!(
+                                "```json\n{}\n```\n",
+                                serde_json::to_string_pretty(&v).unwrap_or(body)
+                            )
+                        }
                         None => {
-                            let _ = self.store.doc_upsert(&id, &path_s, &opts.job, &hash, "FAILED", r.call_id, None);
-                            res.detail = Some("job expects JSON and the reply had none; nothing written".into());
+                            let _ = self.store.doc_upsert(
+                                &id, &path_s, &opts.job, &hash, "FAILED", r.call_id, None,
+                            );
+                            res.detail = Some(
+                                "job expects JSON and the reply had none; nothing written".into(),
+                            );
                             return res;
                         }
                     }
@@ -273,12 +330,37 @@ impl Forge {
                     .and_then(|_| shelve(&out_path, &opts.outbox))
                     .and_then(|_| std::fs::write(&out_path, doc).map_err(anyhow::Error::from));
                 if let Err(e) = write {
-                    let _ = self.store.doc_upsert(&id, &path_s, &opts.job, &hash, "FAILED", r.call_id, Some(&r.reply.text));
-                    res.detail = Some(format!("model answered but writing the OUTBOX file failed: {e:#}"));
+                    let _ = self.store.doc_upsert(
+                        &id,
+                        &path_s,
+                        &opts.job,
+                        &hash,
+                        "FAILED",
+                        r.call_id,
+                        Some(&r.reply.text),
+                    );
+                    res.detail = Some(format!(
+                        "model answered but writing the OUTBOX file failed: {e:#}"
+                    ));
                     return res;
                 }
-                let _ = self.store.doc_upsert(&id, &path_s, &opts.job, &hash, "DONE", r.call_id, Some(&r.reply.text));
-                let _ = self.store.derivative_add(&id, &text_sha256, &opts.job, &out_path.display().to_string(), &out_sha, r.call_id);
+                let _ = self.store.doc_upsert(
+                    &id,
+                    &path_s,
+                    &opts.job,
+                    &hash,
+                    "DONE",
+                    r.call_id,
+                    Some(&r.reply.text),
+                );
+                let _ = self.store.derivative_add(
+                    &id,
+                    &text_sha256,
+                    &opts.job,
+                    &out_path.display().to_string(),
+                    &out_sha,
+                    r.call_id,
+                );
                 res.status = "DONE".into();
                 res.output = Some(out_path.display().to_string());
                 res.provider = Some(r.provider);
@@ -287,11 +369,17 @@ impl Forge {
                 res
             }
             Err(f) => {
-                let _ = self.store.doc_upsert(&id, &path_s, &opts.job, &hash, "FAILED", None, None);
+                let _ = self
+                    .store
+                    .doc_upsert(&id, &path_s, &opts.job, &hash, "FAILED", None, None);
                 res.detail = Some(format!(
                     "{}{}",
                     f.message,
-                    f.attempts.last().and_then(|a| a.error.as_ref()).map(|e| format!(" (last error: {e})")).unwrap_or_default()
+                    f.attempts
+                        .last()
+                        .and_then(|a| a.error.as_ref())
+                        .map(|e| format!(" (last error: {e})"))
+                        .unwrap_or_default()
                 ));
                 res
             }
@@ -343,7 +431,11 @@ impl Forge {
             results.push(done.unwrap_or_else(panic_result));
         }
         if !opts.dry_run {
-            let list: String = results.iter().filter_map(|r| r.output.clone()).map(|p| p + "\n").collect();
+            let list: String = results
+                .iter()
+                .filter_map(|r| r.output.clone())
+                .map(|p| p + "\n")
+                .collect();
             let _ = std::fs::create_dir_all(&opts.outbox);
             let _ = std::fs::write(opts.outbox.join("_last_run.txt"), list);
         }
@@ -378,26 +470,56 @@ pub fn import_context(forge: &Forge, path: &Path, kind: &str, lines: bool) -> Re
     for f in files {
         let text = std::fs::read_to_string(&f)?;
         let src = f.display().to_string();
-        let stem = f.file_stem().and_then(|s| s.to_str()).unwrap_or("doc").to_string();
+        let stem = f
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("doc")
+            .to_string();
         if f.extension().is_some_and(|x| x == "json") {
-            let arr: Vec<serde_json::Value> = serde_json::from_str(&text).with_context(|| format!("{src}: want a JSON array"))?;
+            let arr: Vec<serde_json::Value> =
+                serde_json::from_str(&text).with_context(|| format!("{src}: want a JSON array"))?;
             for (i, v) in arr.iter().enumerate() {
-                let body = v["body"].as_str().or(v["text"].as_str()).ok_or_else(|| anyhow!("{src}[{i}]: no body/text"))?;
-                let key = v["key"].as_str().map(str::to_string).unwrap_or_else(|| format!("{stem}#{i}"));
+                let body = v["body"]
+                    .as_str()
+                    .or(v["text"].as_str())
+                    .ok_or_else(|| anyhow!("{src}[{i}]: no body/text"))?;
+                let key = v["key"]
+                    .as_str()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("{stem}#{i}"));
                 let title = v["title"].as_str().unwrap_or(&key).to_string();
-                forge.store.context_put(&key, v["kind"].as_str().unwrap_or(kind), &title, body, Some(&src), v["tags"].as_str())?;
+                forge.store.context_put(
+                    &key,
+                    v["kind"].as_str().unwrap_or(kind),
+                    &title,
+                    body,
+                    Some(&src),
+                    v["tags"].as_str(),
+                )?;
                 n += 1;
             }
             continue;
         }
         if lines {
             for (i, line) in text.lines().enumerate() {
-                let l = line.trim().trim_start_matches(|c: char| c.is_ascii_digit() || c == '.' || c == '-' || c == '*').trim();
+                let l = line
+                    .trim()
+                    .trim_start_matches(|c: char| {
+                        c.is_ascii_digit() || c == '.' || c == '-' || c == '*'
+                    })
+                    .trim();
                 if l.chars().count() < 8 || l.starts_with('#') {
                     continue;
                 }
                 let title: String = l.split('|').next().unwrap_or(l).chars().take(80).collect();
-                forge.store.context_put(&format!("{stem}:L{}", i + 1), kind, title.trim(), l, Some(&src), None)?;
+                forge.store.context_put(
+                    &format!("{stem}:L{}", i + 1),
+                    kind,
+                    title.trim(),
+                    l,
+                    Some(&src),
+                    None,
+                )?;
                 n += 1;
             }
             continue;
@@ -409,7 +531,14 @@ pub fn import_context(forge: &Forge, path: &Path, kind: &str, lines: bool) -> Re
             if body.trim().is_empty() {
                 return Ok(0);
             }
-            forge.store.context_put(&format!("{stem}#{idx}"), kind, title, body.trim(), Some(&src), None)?;
+            forge.store.context_put(
+                &format!("{stem}#{idx}"),
+                kind,
+                title,
+                body.trim(),
+                Some(&src),
+                None,
+            )?;
             Ok(1)
         };
         for line in text.lines() {
@@ -433,7 +562,11 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
     for e in std::fs::read_dir(dir)?.flatten() {
         let p = e.path();
         if p.is_dir() {
-            if !p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with('.')) {
+            if !p
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with('.'))
+            {
                 walk(&p, out)?;
             }
         } else if p.extension().is_some_and(|x| x == "md" || x == "json") {
@@ -449,13 +582,23 @@ mod tests {
 
     #[test]
     fn key_terms_prefers_repeated_content_words() {
-        let t = key_terms("Grace grace GRACE entropy entropy with with with the and coherence", 3);
+        let t = key_terms(
+            "Grace grace GRACE entropy entropy with with with the and coherence",
+            3,
+        );
         assert_eq!(t, "grace entropy coherence");
     }
 
     #[test]
     fn context_render_caps_length() {
-        let h = ContextHit { key: "k".into(), kind: "law".into(), title: "T".into(), body: "x".repeat(500), source: None, score: 1.0 };
+        let h = ContextHit {
+            key: "k".into(),
+            kind: "law".into(),
+            title: "T".into(),
+            body: "x".repeat(500),
+            source: None,
+            score: 1.0,
+        };
         let s = render_context(&[h.clone(), h], 300);
         assert!(s.chars().count() <= 300);
     }

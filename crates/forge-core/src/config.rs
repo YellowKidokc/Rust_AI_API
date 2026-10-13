@@ -74,7 +74,11 @@ impl ProviderDef {
     }
 
     pub fn url(&self) -> String {
-        format!("{}/{}", self.base.trim_end_matches('/'), self.chat.trim_start_matches('/'))
+        format!(
+            "{}/{}",
+            self.base.trim_end_matches('/'),
+            self.chat.trim_start_matches('/')
+        )
     }
 }
 
@@ -154,7 +158,12 @@ pub struct RetryCfg {
 }
 impl Default for RetryCfg {
     fn default() -> Self {
-        Self { attempts: d_attempts(), base_seconds: d_base(), max_seconds: d_max(), cascade_on_429: true }
+        Self {
+            attempts: d_attempts(),
+            base_seconds: d_base(),
+            max_seconds: d_max(),
+            cascade_on_429: true,
+        }
     }
 }
 fn d_attempts() -> u32 {
@@ -191,7 +200,10 @@ pub struct ContextCfg {
 }
 impl Default for ContextCfg {
     fn default() -> Self {
-        Self { top_k: d_top_k(), max_chars: d_ctx_chars() }
+        Self {
+            top_k: d_top_k(),
+            max_chars: d_ctx_chars(),
+        }
     }
 }
 fn d_top_k() -> usize {
@@ -230,7 +242,10 @@ pub struct ServerCfg {
 }
 impl Default for ServerCfg {
     fn default() -> Self {
-        Self { port: d_port(), cors_origins: vec![] }
+        Self {
+            port: d_port(),
+            cors_origins: vec![],
+        }
     }
 }
 fn d_port() -> u16 {
@@ -296,7 +311,9 @@ fn d_temp() -> f32 {
 impl Settings {
     /// The route name used when a caller doesn't name one.
     pub fn default_route_name(&self) -> String {
-        self.default_route.clone().unwrap_or_else(|| "default".into())
+        self.default_route
+            .clone()
+            .unwrap_or_else(|| "default".into())
     }
 
     /// If `settings.json` has no `routes`, derive `default` from `default_provider` + `fallback[]`,
@@ -323,11 +340,17 @@ impl Settings {
         }
     }
 
-    fn model_for(&self, provider: &str, providers: &BTreeMap<String, ProviderDef>) -> Option<String> {
+    fn model_for(
+        &self,
+        provider: &str,
+        providers: &BTreeMap<String, ProviderDef>,
+    ) -> Option<String> {
         if let Some(m) = self.models.get(provider).and_then(|v| v.as_str()) {
             return Some(m.to_string());
         }
-        providers.get(provider).and_then(|d| d.default_model.clone())
+        providers
+            .get(provider)
+            .and_then(|d| d.default_model.clone())
     }
 }
 
@@ -401,16 +424,36 @@ impl Config {
         Self::from_strings(&providers, &settings, base.to_path_buf(), Some(cfg))
     }
 
-    pub fn from_strings(providers: &str, settings: &str, base: PathBuf, config_dir: Option<PathBuf>) -> Result<Self> {
-        let providers: BTreeMap<String, ProviderDef> = serde_json::from_str(strip_bom(providers)).context("parsing providers.json")?;
-        let mut settings: Settings = serde_json::from_str(strip_bom(settings)).context("parsing settings.json")?;
+    pub fn from_strings(
+        providers: &str,
+        settings: &str,
+        base: PathBuf,
+        config_dir: Option<PathBuf>,
+    ) -> Result<Self> {
+        let providers: BTreeMap<String, ProviderDef> =
+            serde_json::from_str(strip_bom(providers)).context("parsing providers.json")?;
+        let mut settings: Settings =
+            serde_json::from_str(strip_bom(settings)).context("parsing settings.json")?;
         settings.ensure_default_route(&providers);
-        let templates_dir = [base.join("templates"), base.join("config").join("templates")]
-            .into_iter()
-            .find(|p| p.is_dir())
-            .unwrap_or_else(|| base.join("templates"));
-        let paths = Paths { data_dir: base.join("_data"), logs_dir: base.join("LOGS"), templates_dir, config_dir, base };
-        Ok(Self { providers, settings, paths })
+        let templates_dir = [
+            base.join("templates"),
+            base.join("config").join("templates"),
+        ]
+        .into_iter()
+        .find(|p| p.is_dir())
+        .unwrap_or_else(|| base.join("templates"));
+        let paths = Paths {
+            data_dir: base.join("_data"),
+            logs_dir: base.join("LOGS"),
+            templates_dir,
+            config_dir,
+            base,
+        };
+        Ok(Self {
+            providers,
+            settings,
+            paths,
+        })
     }
 
     /// Resolve `alias_of` chains to the concrete definition.
@@ -473,12 +516,25 @@ mod tests {
 
     #[test]
     fn built_in_defaults_parse_and_have_a_default_route() {
-        let c = Config::from_strings(DEFAULT_PROVIDERS, DEFAULT_SETTINGS, PathBuf::from("."), None).unwrap();
+        let c = Config::from_strings(
+            DEFAULT_PROVIDERS,
+            DEFAULT_SETTINGS,
+            PathBuf::from("."),
+            None,
+        )
+        .unwrap();
         let name = c.settings.default_route_name();
-        assert!(c.settings.routes.contains_key(&name), "missing route {name}");
+        assert!(
+            c.settings.routes.contains_key(&name),
+            "missing route {name}"
+        );
         for ladder in c.settings.routes.values() {
             for e in ladder {
-                assert!(c.providers.contains_key(&e.provider), "route names unknown provider {}", e.provider);
+                assert!(
+                    c.providers.contains_key(&e.provider),
+                    "route names unknown provider {}",
+                    e.provider
+                );
             }
         }
     }
@@ -493,6 +549,9 @@ mod tests {
         assert_eq!(r.len(), 2);
         assert_eq!(r[0].model.as_deref(), Some("deepseek-chat"));
         assert_eq!(r[1].provider, "openai");
-        assert_eq!(c.providers["deepseek"].url(), "https://api.deepseek.com/chat/completions");
+        assert_eq!(
+            c.providers["deepseek"].url(),
+            "https://api.deepseek.com/chat/completions"
+        );
     }
 }

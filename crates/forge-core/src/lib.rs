@@ -44,7 +44,11 @@ impl Forge {
 
     pub fn with_store(config: Config, store: Store) -> anyhow::Result<Arc<Self>> {
         let router = Router::new(config.clone(), store.clone())?;
-        Ok(Arc::new(Self { config, store, router }))
+        Ok(Arc::new(Self {
+            config,
+            store,
+            router,
+        }))
     }
 
     /// The project brief another AI should read before working: `BRIEF.md` next to `config/`,
@@ -53,6 +57,10 @@ impl Forge {
         if let Ok(s) = std::fs::read_to_string(self.config.paths.brief_path()) {
             return Some(s);
         }
-        self.store.context_get("brief").ok().flatten().map(|h| h.body)
+        self.store
+            .context_get("brief")
+            .ok()
+            .flatten()
+            .map(|h| h.body)
     }
 }

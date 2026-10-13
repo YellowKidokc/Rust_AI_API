@@ -12,10 +12,16 @@ pub struct Message {
 
 impl Message {
     pub fn system(content: impl Into<String>) -> Self {
-        Self { role: "system".into(), content: content.into() }
+        Self {
+            role: "system".into(),
+            content: content.into(),
+        }
     }
     pub fn user(content: impl Into<String>) -> Self {
-        Self { role: "user".into(), content: content.into() }
+        Self {
+            role: "user".into(),
+            content: content.into(),
+        }
     }
 }
 
@@ -42,7 +48,10 @@ pub struct ChatReply {
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum LlmError {
     #[error("rate limited (429): {body}")]
-    RateLimited { retry_after: Option<Duration>, body: String },
+    RateLimited {
+        retry_after: Option<Duration>,
+        body: String,
+    },
     #[error("server error {status}: {body}")]
     Server { status: u16, body: String },
     #[error("auth refused {status}: {body}")]
@@ -65,7 +74,13 @@ pub enum LlmError {
 impl LlmError {
     /// Worth retrying against the same provider/model after a back-off.
     pub fn retryable(&self) -> bool {
-        matches!(self, LlmError::RateLimited { .. } | LlmError::Server { .. } | LlmError::Timeout | LlmError::Connect(_))
+        matches!(
+            self,
+            LlmError::RateLimited { .. }
+                | LlmError::Server { .. }
+                | LlmError::Timeout
+                | LlmError::Connect(_)
+        )
     }
 
     pub fn kind(&self) -> &'static str {

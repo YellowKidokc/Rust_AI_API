@@ -231,13 +231,19 @@ impl Store {
         let conn = Connection::open(path)?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.execute_batch(SCHEMA)?;
-        Ok(Self { conn: Arc::new(Mutex::new(conn)), path: path.display().to_string() })
+        Ok(Self {
+            conn: Arc::new(Mutex::new(conn)),
+            path: path.display().to_string(),
+        })
     }
 
     pub fn open_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch(SCHEMA)?;
-        Ok(Self { conn: Arc::new(Mutex::new(conn)), path: ":memory:".into() })
+        Ok(Self {
+            conn: Arc::new(Mutex::new(conn)),
+            path: ":memory:".into(),
+        })
     }
 
     pub fn lock(&self) -> MutexGuard<'_, Connection> {
@@ -293,9 +299,11 @@ impl Store {
 
     pub fn spend_today(&self) -> Result<f64> {
         let day = chrono::Utc::now().format("%Y-%m-%d").to_string();
-        let v: f64 =
-            self.lock()
-                .query_row("SELECT COALESCE(SUM(cost_usd),0) FROM calls WHERE substr(started_at,1,10) = ?1", params![day], |r| r.get(0))?;
+        let v: f64 = self.lock().query_row(
+            "SELECT COALESCE(SUM(cost_usd),0) FROM calls WHERE substr(started_at,1,10) = ?1",
+            params![day],
+            |r| r.get(0),
+        )?;
         Ok(v)
     }
 
@@ -344,8 +352,14 @@ impl Store {
     pub fn archive_older_than(&self, days: u32) -> Result<(usize, usize)> {
         let cutoff = (chrono::Utc::now() - chrono::Duration::days(days as i64)).to_rfc3339();
         let db = self.lock();
-        let c = db.execute("UPDATE calls SET archived = 1 WHERE archived = 0 AND started_at < ?1", params![cutoff])?;
-        let d = db.execute("UPDATE documents SET archived = 1 WHERE archived = 0 AND updated_at < ?1", params![cutoff])?;
+        let c = db.execute(
+            "UPDATE calls SET archived = 1 WHERE archived = 0 AND started_at < ?1",
+            params![cutoff],
+        )?;
+        let d = db.execute(
+            "UPDATE documents SET archived = 1 WHERE archived = 0 AND updated_at < ?1",
+            params![cutoff],
+        )?;
         Ok((c, d))
     }
 
@@ -396,7 +410,10 @@ impl Store {
                 last_output=COALESCE(excluded.last_output, last_output), updated_at=excluded.updated_at, archived=0",
             params![doc_id, path, job, source_hash, status, last_call_id, last_output, t],
         )?;
-        db.execute("INSERT INTO doc_events (doc_id, at, event, detail) VALUES (?1, ?2, ?3, ?4)", params![doc_id, t, status, job])?;
+        db.execute(
+            "INSERT INTO doc_events (doc_id, at, event, detail) VALUES (?1, ?2, ?3, ?4)",
+            params![doc_id, t, status, job],
+        )?;
         Ok(())
     }
 
@@ -408,13 +425,18 @@ impl Store {
              ON CONFLICT(doc_id) DO UPDATE SET notes = COALESCE(notes || char(10), '') || ?2, updated_at = ?3",
             params![doc_id, note, t],
         )?;
-        db.execute("INSERT INTO doc_events (doc_id, at, event, detail) VALUES (?1, ?2, 'NOTE', ?3)", params![doc_id, t, note])?;
+        db.execute(
+            "INSERT INTO doc_events (doc_id, at, event, detail) VALUES (?1, ?2, 'NOTE', ?3)",
+            params![doc_id, t, note],
+        )?;
         Ok(())
     }
 
     pub fn doc_events(&self, doc_id: &str, limit: u32) -> Result<Vec<Value>> {
         let db = self.lock();
-        let mut st = db.prepare("SELECT at, event, detail FROM doc_events WHERE doc_id = ?1 ORDER BY id DESC LIMIT ?2")?;
+        let mut st = db.prepare(
+            "SELECT at, event, detail FROM doc_events WHERE doc_id = ?1 ORDER BY id DESC LIMIT ?2",
+        )?;
         let rows = st.query_map(params![doc_id, limit], |r| {
             Ok(serde_json::json!({"at": r.get::<_, String>(0)?, "event": r.get::<_, String>(1)?, "detail": r.get::<_, Option<String>>(2)?}))
         })?;
@@ -423,7 +445,15 @@ impl Store {
 
     // ---------------- context ----------------
 
-    pub fn context_put(&self, key: &str, kind: &str, title: &str, body: &str, source: Option<&str>, tags: Option<&str>) -> Result<()> {
+    pub fn context_put(
+        &self,
+        key: &str,
+        kind: &str,
+        title: &str,
+        body: &str,
+        source: Option<&str>,
+        tags: Option<&str>,
+    ) -> Result<()> {
         self.lock().execute(
             "INSERT INTO context (key, kind, title, body, source, tags, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7)
              ON CONFLICT(key) DO UPDATE SET kind=excluded.kind, title=excluded.title, body=excluded.body,
@@ -436,18 +466,36 @@ impl Store {
     pub fn context_get(&self, key: &str) -> Result<Option<ContextHit>> {
         Ok(self
             .lock()
-            .query_row("SELECT key, kind, title, body, source FROM context WHERE key = ?1", params![key], |r| {
-                Ok(ContextHit { key: r.get(0)?, kind: r.get(1)?, title: r.get(2)?, body: r.get(3)?, source: r.get(4)?, score: 0.0 })
-            })
+            .query_row(
+                "SELECT key, kind, title, body, source FROM context WHERE key = ?1",
+                params![key],
+                |r| {
+                    Ok(ContextHit {
+                        key: r.get(0)?,
+                        kind: r.get(1)?,
+                        title: r.get(2)?,
+                        body: r.get(3)?,
+                        source: r.get(4)?,
+                        score: 0.0,
+                    })
+                },
+            )
             .optional()?)
     }
 
     pub fn context_count(&self) -> Result<i64> {
-        Ok(self.lock().query_row("SELECT COUNT(*) FROM context", [], |r| r.get(0))?)
+        Ok(self
+            .lock()
+            .query_row("SELECT COUNT(*) FROM context", [], |r| r.get(0))?)
     }
 
     /// BM25 search. Free text is turned into an OR of quoted terms, so user input can't break FTS syntax.
-    pub fn context_search(&self, query: &str, limit: usize, kind: Option<&str>) -> Result<Vec<ContextHit>> {
+    pub fn context_search(
+        &self,
+        query: &str,
+        limit: usize,
+        kind: Option<&str>,
+    ) -> Result<Vec<ContextHit>> {
         let fts = fts_query(query);
         if fts.is_empty() {
             return Ok(vec![]);
@@ -494,7 +542,10 @@ impl Store {
             )
             .optional()?;
         if hit.is_some() {
-            db.execute("UPDATE cache SET hits = hits + 1 WHERE key = ?1", params![key])?;
+            db.execute(
+                "UPDATE cache SET hits = hits + 1 WHERE key = ?1",
+                params![key],
+            )?;
         }
         Ok(hit)
     }
@@ -544,7 +595,10 @@ impl Store {
 
     pub fn audit_put(&self, body: &str) -> Result<i64> {
         let db = self.lock();
-        db.execute("INSERT INTO audits (at, body) VALUES (?1, ?2)", params![now(), body])?;
+        db.execute(
+            "INSERT INTO audits (at, body) VALUES (?1, ?2)",
+            params![now(), body],
+        )?;
         Ok(db.last_insert_rowid())
     }
 }
@@ -569,13 +623,42 @@ mod tests {
     #[test]
     fn fts5_search_ranks_and_survives_hostile_input() {
         let s = Store::open_memory().unwrap();
-        s.context_put("law4", "law", "Law 4 Strong Force", "Love as the binding potential, Yukawa V(r)", None, Some("fruits")).unwrap();
-        s.context_put("law5", "law", "Law 5 Thermodynamics", "Judgment and heat death; F = E - TS", None, None).unwrap();
-        let hits = s.context_search("what binds? Yukawa \"OR NOT (", 5, None).unwrap();
+        s.context_put(
+            "law4",
+            "law",
+            "Law 4 Strong Force",
+            "Love as the binding potential, Yukawa V(r)",
+            None,
+            Some("fruits"),
+        )
+        .unwrap();
+        s.context_put(
+            "law5",
+            "law",
+            "Law 5 Thermodynamics",
+            "Judgment and heat death; F = E - TS",
+            None,
+            None,
+        )
+        .unwrap();
+        let hits = s
+            .context_search("what binds? Yukawa \"OR NOT (", 5, None)
+            .unwrap();
         assert_eq!(hits[0].key, "law4");
-        s.context_put("law4", "law", "Law 4", "replaced body about entropy", None, None).unwrap();
+        s.context_put(
+            "law4",
+            "law",
+            "Law 4",
+            "replaced body about entropy",
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(s.context_search("Yukawa", 5, None).unwrap().len(), 0);
-        assert_eq!(s.context_search("entropy", 5, Some("law")).unwrap()[0].key, "law4");
+        assert_eq!(
+            s.context_search("entropy", 5, Some("law")).unwrap()[0].key,
+            "law4"
+        );
     }
 
     #[test]

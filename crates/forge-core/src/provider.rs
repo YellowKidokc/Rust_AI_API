@@ -20,7 +20,11 @@ pub trait Provider: Send + Sync {
 }
 
 /// Build a provider from its definition. Fails with `MissingKey` when the named env var is unset.
-pub fn build(name: &str, def: &ProviderDef, client: reqwest::Client) -> Result<Arc<dyn Provider>, LlmError> {
+pub fn build(
+    name: &str,
+    def: &ProviderDef,
+    client: reqwest::Client,
+) -> Result<Arc<dyn Provider>, LlmError> {
     let key = match (&def.key, def.no_key) {
         (_, true) | (None, _) => None,
         (Some(var), false) => match std::env::var(var) {
@@ -31,8 +35,20 @@ pub fn build(name: &str, def: &ProviderDef, client: reqwest::Client) -> Result<A
     let headers = extra_headers(&def.headers);
     Ok(match def.wire() {
         Wire::Mock => Arc::new(MockProvider::echo(name)),
-        Wire::Openai => Arc::new(OpenAiCompat { name: name.into(), url: def.url(), key, headers, client }),
-        Wire::Anthropic => Arc::new(Anthropic { name: name.into(), url: def.url(), key, headers, client }),
+        Wire::Openai => Arc::new(OpenAiCompat {
+            name: name.into(),
+            url: def.url(),
+            key,
+            headers,
+            client,
+        }),
+        Wire::Anthropic => Arc::new(Anthropic {
+            name: name.into(),
+            url: def.url(),
+            key,
+            headers,
+            client,
+        }),
     })
 }
 
@@ -65,11 +81,25 @@ async fn map_status(resp: reqwest::Response) -> Result<Value, LlmError> {
     let body = resp.text().await.map_err(map_send_error)?;
     let short: String = body.chars().take(500).collect();
     match status {
-        200..=299 => serde_json::from_str(&body).map_err(|e| LlmError::InvalidReply(format!("{e}: {short}"))),
-        429 => Err(LlmError::RateLimited { retry_after, body: short }),
-        401 | 403 => Err(LlmError::Auth { status, body: short }),
-        408 | 500..=599 => Err(LlmError::Server { status, body: short }),
-        _ => Err(LlmError::BadRequest { status, body: short }),
+        200..=299 => {
+            serde_json::from_str(&body).map_err(|e| LlmError::InvalidReply(format!("{e}: {short}")))
+        }
+        429 => Err(LlmError::RateLimited {
+            retry_after,
+            body: short,
+        }),
+        401 | 403 => Err(LlmError::Auth {
+            status,
+            body: short,
+        }),
+        408 | 500..=599 => Err(LlmError::Server {
+            status,
+            body: short,
+        }),
+        _ => Err(LlmError::BadRequest {
+            status,
+            body: short,
+        }),
     }
 }
 
@@ -91,9 +121,21 @@ pub struct OpenAiCompat {
 
 impl OpenAiCompat {
     pub fn body(req: &ChatRequest) -> Value {
-        let mut messages: Vec<Value> = req.messages.iter().map(|m| json!({"role": m.role, "content": m.content})).collect();
-        if req.json_mode && !req.messages.iter().any(|m| m.content.to_lowercase().contains("json")) {
-            messages.insert(0, json!({"role": "system", "content": "Reply with a single JSON object."}));
+        let mut messages: Vec<Value> = req
+            .messages
+            .iter()
+            .map(|m| json!({"role": m.role, "content": m.content}))
+            .collect();
+        if req.json_mode
+            && !req
+                .messages
+                .iter()
+                .any(|m| m.content.to_lowercase().contains("json"))
+        {
+            messages.insert(
+                0,
+                json!({"role": "system", "content": "Reply with a single JSON object."}),
+            );
         }
         let mut body = json!({
             "model": req.model,
@@ -110,14 +152,20 @@ impl OpenAiCompat {
     pub fn parse(v: &Value) -> Result<ChatReply, LlmError> {
         let choice = &v["choices"][0];
         if choice.is_null() {
-            return Err(LlmError::InvalidReply(format!("no choices in reply: {}", truncate(&v.to_string(), 300))));
+            return Err(LlmError::InvalidReply(format!(
+                "no choices in reply: {}",
+                truncate(&v.to_string(), 300)
+            )));
         }
         let finish = choice["finish_reason"].as_str().map(str::to_string);
         let completion_tokens = u32_at(v, &["usage", "completion_tokens"]);
         if finish.as_deref() == Some("length") {
             return Err(LlmError::Truncated { completion_tokens });
         }
-        let text = choice["message"]["content"].as_str().unwrap_or_default().to_string();
+        let text = choice["message"]["content"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
         if text.trim().is_empty() {
             return Err(LlmError::InvalidReply("empty content".into()));
         }
@@ -138,7 +186,11 @@ impl Provider for OpenAiCompat {
     }
 
     async fn complete(&self, req: &ChatRequest) -> Result<ChatReply, LlmError> {
-        let mut rb = self.client.post(&self.url).headers(self.headers.clone()).json(&Self::body(req));
+        let mut rb = self
+            .client
+            .post(&self.url)
+            .headers(self.headers.clone())
+            .json(&Self::body(req));
         if let Some(k) = &self.key {
             rb = rb.bearer_auth(k);
         }
@@ -162,14 +214,20 @@ pub struct Anthropic {
 impl Anthropic {
     /// Current Claude models reject non-default sampling parameters, so `temperature` is not sent.
     pub fn body(req: &ChatRequest) -> Value {
-        let system: Vec<&str> = req.messages.iter().filter(|m| m.role == "system").map(|m| m.content.as_str()).collect();
+        let system: Vec<&str> = req
+            .messages
+            .iter()
+            .filter(|m| m.role == "system")
+            .map(|m| m.content.as_str())
+            .collect();
         let messages: Vec<Value> = req
             .messages
             .iter()
             .filter(|m| m.role != "system")
             .map(|m| json!({"role": if m.role == "assistant" { "assistant" } else { "user" }, "content": m.content}))
             .collect();
-        let mut body = json!({ "model": req.model, "max_tokens": req.max_tokens, "messages": messages });
+        let mut body =
+            json!({ "model": req.model, "max_tokens": req.max_tokens, "messages": messages });
         let mut sys = system.join("\n\n");
         if req.json_mode {
             if !sys.is_empty() {
@@ -189,14 +247,24 @@ impl Anthropic {
         match stop.as_deref() {
             Some("max_tokens") => return Err(LlmError::Truncated { completion_tokens }),
             Some("refusal") => {
-                return Err(LlmError::InvalidReply(format!("model declined (refusal): {}", v["stop_details"])));
+                return Err(LlmError::InvalidReply(format!(
+                    "model declined (refusal): {}",
+                    v["stop_details"]
+                )));
             }
             _ => {}
         }
         // Thinking blocks may precede the answer: join every text block.
         let text: String = v["content"]
             .as_array()
-            .map(|blocks| blocks.iter().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join(""))
+            .map(|blocks| {
+                blocks
+                    .iter()
+                    .filter(|b| b["type"] == "text")
+                    .filter_map(|b| b["text"].as_str())
+                    .collect::<Vec<_>>()
+                    .join("")
+            })
             .unwrap_or_default();
         if text.trim().is_empty() {
             return Err(LlmError::InvalidReply("no text content".into()));
@@ -218,8 +286,12 @@ impl Provider for Anthropic {
     }
 
     async fn complete(&self, req: &ChatRequest) -> Result<ChatReply, LlmError> {
-        let mut rb =
-            self.client.post(&self.url).headers(self.headers.clone()).header("anthropic-version", "2023-06-01").json(&Self::body(req));
+        let mut rb = self
+            .client
+            .post(&self.url)
+            .headers(self.headers.clone())
+            .header("anthropic-version", "2023-06-01")
+            .json(&Self::body(req));
         if let Some(k) = &self.key {
             rb = rb.header("x-api-key", k);
         }
@@ -245,7 +317,11 @@ impl MockProvider {
     }
 
     pub fn scripted(name: &str, steps: Vec<Result<ChatReply, LlmError>>) -> Self {
-        Self { name: name.into(), script: Mutex::new(steps.into()), calls: Default::default() }
+        Self {
+            name: name.into(),
+            script: Mutex::new(steps.into()),
+            calls: Default::default(),
+        }
     }
 
     pub fn ok(text: &str) -> Result<ChatReply, LlmError> {
@@ -270,12 +346,23 @@ impl Provider for MockProvider {
         if let Some(step) = self.script.lock().unwrap().pop_front() {
             return step;
         }
-        let user = req.messages.iter().rev().find(|m| m.role == "user").map(|m| m.content.as_str()).unwrap_or("");
+        let user = req
+            .messages
+            .iter()
+            .rev()
+            .find(|m| m.role == "user")
+            .map(|m| m.content.as_str())
+            .unwrap_or("");
         let chars = req.messages.iter().map(|m| m.content.len()).sum::<usize>();
         let text = if req.json_mode {
             json!({"mock": true, "model": req.model, "input_chars": chars}).to_string()
         } else {
-            format!("[mock:{}] {} chars in. First line: {}", req.model, chars, user.lines().next().unwrap_or("").trim())
+            format!(
+                "[mock:{}] {} chars in. First line: {}",
+                req.model,
+                chars,
+                user.lines().next().unwrap_or("").trim()
+            )
         };
         Ok(ChatReply {
             text,
@@ -310,13 +397,21 @@ mod tests {
     fn openai_json_mode_adds_instruction_and_format() {
         let b = OpenAiCompat::body(&req(true));
         assert_eq!(b["response_format"]["type"], "json_object");
-        assert_eq!(b["messages"][0]["content"], "Reply with a single JSON object.");
+        assert_eq!(
+            b["messages"][0]["content"],
+            "Reply with a single JSON object."
+        );
     }
 
     #[test]
     fn openai_length_is_truncation_error() {
         let v = json!({"choices":[{"message":{"content":"half"},"finish_reason":"length"}],"usage":{"completion_tokens":100}});
-        assert!(matches!(OpenAiCompat::parse(&v), Err(LlmError::Truncated { completion_tokens: 100 })));
+        assert!(matches!(
+            OpenAiCompat::parse(&v),
+            Err(LlmError::Truncated {
+                completion_tokens: 100
+            })
+        ));
     }
 
     #[test]
@@ -333,6 +428,9 @@ mod tests {
                        "stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":2},"model":"x"});
         assert_eq!(Anthropic::parse(&v).unwrap().text, "ab");
         let cut = json!({"content":[{"type":"text","text":"a"}],"stop_reason":"max_tokens","usage":{"output_tokens":9}});
-        assert!(matches!(Anthropic::parse(&cut), Err(LlmError::Truncated { .. })));
+        assert!(matches!(
+            Anthropic::parse(&cut),
+            Err(LlmError::Truncated { .. })
+        ));
     }
 }
