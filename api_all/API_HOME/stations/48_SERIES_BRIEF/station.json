@@ -1,0 +1,16 @@
+{
+  "number": "48",
+  "name": "SERIES_BRIEF",
+  "label": "48_SERIES_BRIEF",
+  "folder": "stations/48_SERIES_BRIEF",
+  "script": "48_series_brief.py",
+  "rank": 20,
+  "options": [
+    "workers",
+    "provider",
+    "model",
+    "focus",
+    "redo"
+  ],
+  "retired": false
+}

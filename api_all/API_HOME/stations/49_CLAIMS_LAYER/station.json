@@ -1,0 +1,20 @@
+{
+  "number": "49",
+  "name": "CLAIMS_LAYER",
+  "label": "49_CLAIMS_LAYER",
+  "folder": "stations/49_CLAIMS_LAYER",
+  "script": "49_claims_layer.py",
+  "rank": 21,
+  "options": [
+    "limit",
+    "workers",
+    "provider",
+    "model",
+    "focus",
+    "redo",
+    "template",
+    "vocab"
+  ],
+  "template": "CLAIMS_LAYER_TEMPLATE_v0.3",
+  "retired": false
+}

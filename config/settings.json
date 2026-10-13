@@ -1,6 +1,6 @@
 {
   "_readme": "Routes are ladders: forge tries each rung in the order listed and moves down on 429/5xx/timeout/truncation. Prices are USD per 1M tokens; check them against each provider's current price list. Tier (local/free/discount/standard/premium) is a label used by budget and max-tier filters. A note's front matter can pick its route: `route: X`, or words in priority/compute/mode/tags matched against `hints` (first rule wins). Keys come only from the env var named in providers.json.",
-  "max_concurrent_calls": 8,
+  "max_concurrent_calls": 30,
   "turbo_presets": { "1": 10, "2": 30, "3": 60 },
   "allowed_providers": [],
   "output_token_cap": 8000,

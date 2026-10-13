@@ -1,0 +1,12 @@
+{
+  "number": "92",
+  "name": "SITE",
+  "label": "92_SITE",
+  "folder": "stations/92_SITE",
+  "script": "92_site.py",
+  "rank": 22,
+  "options": [
+    "limit"
+  ],
+  "retired": false
+}
