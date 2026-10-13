@@ -58,7 +58,23 @@ def _log(message: str):
     path=inside("LOGS","limiter.log"); path.parent.mkdir(parents=True,exist_ok=True)
     with path.open("a",encoding="utf-8") as f: f.write(f"{datetime.now(timezone.utc).isoformat()} {message}\n")
 
+def _forge_target(model: str) -> tuple[str,str,str] | None:
+    """When FORGE_URL is set (e.g. http://127.0.0.1:8790), every call goes through forge's gateway,
+    so routing, keys, cache, cost ledger and receipts live in forge. FORGE_ROUTE picks a route
+    (default, free, reasoning ...); without it the model is sent as-is and forge pins it."""
+    base=os.environ.get("FORGE_URL","").strip().rstrip("/")
+    if not base: return None
+    return base+"/v1/chat/completions", os.environ.get("FORGE_TOKEN",""), os.environ.get("FORGE_ROUTE","").strip() or model
+
 def _request(provider: str, model: str, messages: list[dict[str,str]], timeout: float) -> dict[str,Any]:
+    forge=_forge_target(model)
+    if forge:
+        url,key,model=forge
+        headers={"Content-Type":"application/json"}
+        if key: headers["Authorization"]=f"Bearer {key}"
+        body=json.dumps({"model":model,"messages":messages,"stream":False}).encode()
+        req=urllib.request.Request(url,data=body,headers=headers)
+        with urllib.request.urlopen(req,timeout=timeout) as response: return json.load(response)
     if provider == "deepseek":
         url="https://api.deepseek.com/chat/completions"; key=os.environ.get("DEEPSEEK_API_KEY","")
     elif provider == "openai":
