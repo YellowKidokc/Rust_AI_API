@@ -48,6 +48,16 @@ A third part, the **vocabulary** (`--vocab NAME`, files in `templates/VOCAB/`), 
 sent as reference, never returned. The model reports only what is present, tagged with codes from it; unknown codes are
 flagged in the receipt. See `templates/VOCAB/README.md`.
 
+## Front side (HTML)
+
+`ONE_MENU.bat 92` writes an `index.html` into every folder, with no model calls:
+- `<papers_root>\index.html`: the dashboard (Gated, Unscored, Scored weakest first, Scoring-dependent, Machine-only,
+  Negative), every series and group, validation, every paper. Filter box on every page.
+- `<collection>\index.html`: the papers in order, the `_BY_STATION` folders, the latest series brief.
+- `<paper>\index.html`: classification (MASTER_INDEX v0.3 fields), validation (V1-V11), each station's latest layer in
+  route order (`--order 49,40,41`), then the original document.
+- `<papers_root>\_SITE\index.tsv` (43 columns, v0.3 source map) and `validation.tsv`.
+
 ## Portability and outputs
 
 All internal paths derive from `engine/paths.py`. Every external root is a named entry in `config/paths.json`; environment variable `ONE_MENU_<KEY>` can override one. Numbered adapters invoke legacy programs only through these roots. New paper runs write dated bundles under `<paper>/02_RUNS/NN_STATION/`, never overwriting an earlier run. Station 46 builds `03_REPORT/report.html` and `report.xlsx`.

@@ -65,7 +65,7 @@ def run(argv=None):
   if args.redo and 'redo' in accepted: cmd.append('--redo')
   if 'vocab' in accepted:
    for v in args.vocab: cmd += ['--vocab',v]
-  if args.dry_run: cmd.append('--dry-run') if n not in {'44','46','47','90','91'} else None
+  if args.dry_run: cmd.append('--dry-run') if n not in {'44','46','47','90','91','92'} else None
   print(f"\n[{n}] {s['name']}\n$ {' '.join(shlex.quote(x) for x in cmd)}")
   completed=subprocess.run(cmd,cwd=API_HOME); results.append({'station':s['label'],'returncode':completed.returncode})
  elapsed=time.monotonic()-started; record={**plan,'started_at':datetime.now(timezone.utc).isoformat(),'elapsed_seconds':elapsed,'results':results}
