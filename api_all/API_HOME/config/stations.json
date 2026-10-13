@@ -283,7 +283,8 @@
       "model",
       "focus",
       "redo",
-      "template"
+      "template",
+      "vocab"
     ],
     "retired": false
   },
@@ -301,7 +302,8 @@
       "model",
       "focus",
       "redo",
-      "template"
+      "template",
+      "vocab"
     ],
     "retired": false
   },
@@ -424,7 +426,8 @@
       "model",
       "focus",
       "redo",
-      "template"
+      "template",
+      "vocab"
     ],
     "template": "CLAIMS_LAYER_TEMPLATE_v0.3",
     "retired": false

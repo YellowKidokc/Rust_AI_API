@@ -9,7 +9,7 @@ from .papers import discover
 from .paths import API_HOME
 
 def arguments(label):
- p=argparse.ArgumentParser(prog=label); p.add_argument('items',nargs='*'); p.add_argument('--limit',type=int); p.add_argument('--workers',type=int,default=30); p.add_argument('--provider',default='deepseek'); p.add_argument('--model',default='deepseek-chat'); p.add_argument('--focus',default=''); p.add_argument('--redo',action='store_true'); p.add_argument('--template',default=''); p.add_argument('--dry-run',action='store_true'); return p.parse_args()
+ p=argparse.ArgumentParser(prog=label); p.add_argument('items',nargs='*'); p.add_argument('--limit',type=int); p.add_argument('--workers',type=int,default=30); p.add_argument('--provider',default='deepseek'); p.add_argument('--model',default='deepseek-chat'); p.add_argument('--focus',default=''); p.add_argument('--redo',action='store_true'); p.add_argument('--template',default=''); p.add_argument('--vocab',action='append',default=[]); p.add_argument('--dry-run',action='store_true'); return p.parse_args()
 AFTER_CALL=('provider','exact_model_string','ISO_8601_timestamp','prompt_completion_total_cost_object')
 def output_template(label,name):
  """--template NAME|path, else the station's default "template" in station.json, else none."""
@@ -19,6 +19,30 @@ def output_template(label,name):
  path=Path(name).expanduser() if Path(name).suffix=='.md' else API_HOME/'templates'/'OUTPUT'/f'{name}.md'
  if not path.is_file(): raise FileNotFoundError(f'output template not found: {path}')
  return path.read_text(encoding='utf-8-sig')
+CODE=re.compile(r'`([^`\s]+)`')
+def vocabularies(label,names):
+ """--vocab NAME|path (repeatable), else the station's "vocab" default (a name or a list), else none."""
+ station=API_HOME/'stations'/label/'station.json'
+ if not names and station.is_file():
+  d=json.loads(station.read_text(encoding='utf-8')).get('vocab',[]); names=[d] if isinstance(d,str) else d
+ texts=[]
+ for n in names:
+  path=Path(n).expanduser() if Path(n).suffix=='.md' else API_HOME/'templates'/'VOCAB'/f'{n}.md'
+  if not path.is_file(): raise FileNotFoundError(f'vocabulary not found: {path}')
+  texts.append(path.read_text(encoding='utf-8-sig'))
+ return texts
+def vocab_block(texts):
+ # Goes first in the prompt: the same opening for every paper lets the provider's prompt cache bill it at the cache-hit rate.
+ if not texts: return ''
+ return ('REFERENCE VOCABULARY (read it; do not reproduce it). Classify everything you report using only the codes below, '
+  'each written in backticks exactly as listed. Report only what is actually present in the document; never list a category '
+  'that has nothing in it. If something fits no code, write `UNCLASSIFIED` and say why in the same row.\n\n'+'\n\n---\n\n'.join(texts)+'\n\nEND OF REFERENCE VOCABULARY\n\n')
+def check_codes(text,vocab_texts,template):
+ """Codes the reply used, and any backticked code that is in no vocabulary (closed vocabulary: those are flagged, never silently kept)."""
+ allowed=set(CODE.findall('\n'.join(vocab_texts)+template))|{'UNCLASSIFIED'}
+ used=CODE.findall(text); counts={}
+ for c in used: counts[c]=counts.get(c,0)+1
+ return {'codes_used':{c:n for c,n in sorted(counts.items()) if c in allowed},'codes_unknown':sorted({c for c in used if c not in allowed})}
 def with_template(instruction,template,meta,src_hash):
  if not template: return instruction
  t=template.replace('{{paper_id}}',str(meta.get('id',''))).replace('{{source_sha256}}',src_hash)
@@ -37,21 +61,23 @@ def ai_bundle(paper:Path,label:str,prompts:list[tuple[str,str]],args):
  template=output_template(label,args.template); template_hash=hashlib.sha256(template.encode()).hexdigest() if template else ""
  checkpoint={"source_hash":src_hash,"prompt_version":"1","model":args.model,"focus_hash":focus_hash}
  if template: checkpoint["template_hash"]=template_hash
+ vocab=vocabularies(label,args.vocab); opening=vocab_block(vocab)
+ if vocab: checkpoint["vocab_hash"]=hashlib.sha256(opening.encode()).hexdigest()
  if not args.redo:
   for prior in sorted((paper/"02_RUNS"/label).glob("*/"+label+".run.json"),reverse=True):
    saved=json.loads(prior.read_text(encoding="utf-8"))
    if all(saved.get(k)==v for k,v in checkpoint.items()) and not saved.get("errors"):
     print(f"SKIP completed {paper}: {prior.parent}"); return
  def one(entry):
-  name,instruction=entry; prompt=append(with_template(instruction,template,meta,src_hash)+'\n\nSOURCE DOCUMENT:\n'+text,focus); result=llm.call([{'role':'user','content':prompt}],provider=args.provider,model=args.model)
+  name,instruction=entry; prompt=append(opening+with_template(instruction,template,meta,src_hash)+'\n\nSOURCE DOCUMENT:\n'+text,focus); result=llm.call([{'role':'user','content':prompt}],provider=args.provider,model=args.model)
   if template and not result.error: result.text=after_call(result.text,result)
   return name,result,prompt
  gathered={}; receipts=[]
  with ThreadPoolExecutor(max_workers=min(args.workers,len(prompts))) as pool:
   futures=[pool.submit(one,p) for p in prompts]
   for f in as_completed(futures):
-   name,result,prompt=f.result(); gathered[name]=result.text if not result.error else {'error':result.error}; receipts.append(llm.receipt(result,source_hash=src_hash,prompt_version='1',focus_text=focus,focus_hash=focus_hash,part=name))
- out=dated_run_dir(paper,label); receipt={'source_hash':src_hash,'model':args.model,'provider':args.provider,'prompt_version':'1','focus_text':focus,'focus_hash':focus_hash,**({'template_hash':template_hash} if template else {}),'tokens':sum(r['tokens'] for r in receipts),'time_seconds':sum(r['elapsed_seconds'] for r in receipts),'errors':[r['error'] for r in receipts if r['error']],'calls':receipts}
+   name,result,prompt=f.result(); gathered[name]=result.text if not result.error else {'error':result.error}; receipts.append(llm.receipt(result,source_hash=src_hash,prompt_version='1',focus_text=focus,focus_hash=focus_hash,part=name,**(check_codes(result.text,vocab,template) if vocab and not result.error else {})))
+ out=dated_run_dir(paper,label); receipt={'source_hash':src_hash,'model':args.model,'provider':args.provider,'prompt_version':'1','focus_text':focus,'focus_hash':focus_hash,**({'template_hash':template_hash} if template else {}),**({'vocab_hash':checkpoint['vocab_hash'],'codes_unknown':sorted({c for r in receipts for c in r.get('codes_unknown',[])})} if vocab else {}),'tokens':sum(r['tokens'] for r in receipts),'time_seconds':sum(r['elapsed_seconds'] for r in receipts),'errors':[r['error'] for r in receipts if r['error']],'calls':receipts}
  body='<h1>'+html.escape(label)+'</h1>'+''.join(f'<section><h2>{html.escape(k)}</h2><pre>{html.escape(v if isinstance(v,str) else json.dumps(v,indent=2))}</pre></section>' for k,v in gathered.items()); write_bundle(out,label,gathered,'<!doctype html><meta charset="utf-8">'+body,receipt,[{'part':k,'result':v if isinstance(v,str) else json.dumps(v)} for k,v in gathered.items()])
  if template:
   parts=[(k,v if isinstance(v,str) else '(call failed: '+v['error']+')') for k,v in gathered.items()]
@@ -70,7 +96,7 @@ def mirror(paper:Path,meta:dict,label:str,out:Path):
 def run_ai(label,prompts):
  args=arguments(label); papers=[x for x in discover(args.items,args.limit) if x.is_dir()]
  if args.dry_run:
-  print(json.dumps({'station':label,'papers':len(papers),'calls':len(papers)*len(prompts),'template':bool(output_template(label,args.template)),'workers':args.workers})); return
+  print(json.dumps({'station':label,'papers':len(papers),'calls':len(papers)*len(prompts),'template':bool(output_template(label,args.template)),'vocabularies':len(vocabularies(label,args.vocab)),'workers':args.workers})); return
  # Papers run side by side; the one process-wide limiter in engine.llm caps calls in flight at --workers.
  llm.configure(args.workers)
  def guarded(paper):

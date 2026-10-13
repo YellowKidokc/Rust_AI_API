@@ -12,7 +12,8 @@
     "model",
     "focus",
     "redo",
-    "template"
+    "template",
+    "vocab"
   ],
   "retired": false
 }

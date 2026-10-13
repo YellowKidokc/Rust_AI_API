@@ -44,6 +44,10 @@ A station's prompt says what to look for; a template in `templates/OUTPUT/` says
 or `--template D:\path\my_format.md` swaps the shape for that run. The filled result is `<station>.md`. Paper id, source
 SHA-256, model, timestamp and token counts are written by the code, not the model. See `templates/OUTPUT/README.md`.
 
+A third part, the **vocabulary** (`--vocab NAME`, files in `templates/VOCAB/`), is the full list of every type there is:
+sent as reference, never returned. The model reports only what is present, tagged with codes from it; unknown codes are
+flagged in the receipt. See `templates/VOCAB/README.md`.
+
 ## Portability and outputs
 
 All internal paths derive from `engine/paths.py`. Every external root is a named entry in `config/paths.json`; environment variable `ONE_MENU_<KEY>` can override one. Numbered adapters invoke legacy programs only through these roots. New paper runs write dated bundles under `<paper>/02_RUNS/NN_STATION/`, never overwriting an earlier run. Station 46 builds `03_REPORT/report.html` and `report.xlsx`.
