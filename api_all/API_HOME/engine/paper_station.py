@@ -13,7 +13,7 @@ def arguments(label):
 def source(paper):
  meta=json.loads((paper/'paper.json').read_text(encoding='utf-8')); path=paper/'00_SOURCE'/meta['source_file']; return meta,path,path.read_text(encoding='utf-8',errors='replace')
 def ai_bundle(paper:Path,label:str,prompts:list[tuple[str,str]],args):
- meta,path,text=source(paper); focus,focus_hash=compose(API_HOME/'stations'/label,paper,args.focus); src_hash=sha256_file(path); llm.configure(args.workers)
+ meta,path,text=source(paper); focus,focus_hash=compose(API_HOME/'stations'/label,paper,args.focus); src_hash=sha256_file(path)
  checkpoint={"source_hash":src_hash,"prompt_version":"1","model":args.model,"focus_hash":focus_hash}
  if not args.redo:
   for prior in sorted((paper/"02_RUNS"/label).glob("*/"+label+".run.json"),reverse=True):
@@ -33,6 +33,9 @@ def ai_bundle(paper:Path,label:str,prompts:list[tuple[str,str]],args):
 
 def run_ai(label,prompts):
  args=arguments(label); papers=[x for x in discover(args.items,args.limit) if x.is_dir()]
- for paper in papers:
+ # Papers run side by side; the one process-wide limiter in engine.llm caps calls in flight at --workers.
+ llm.configure(args.workers)
+ def guarded(paper):
   try: ai_bundle(paper,label,prompts,args)
   except Exception as exc: print(f'{paper}: {type(exc).__name__}: {exc}')
+ with ThreadPoolExecutor(max_workers=max(1,min(args.workers,len(papers)))) as pool: list(pool.map(guarded,papers))
