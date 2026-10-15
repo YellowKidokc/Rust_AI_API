@@ -1,0 +1,53 @@
+{
+  "_readme": "Routes are ladders: forge tries each rung in the order listed and moves down on 429/5xx/timeout/truncation. Prices are USD per 1M tokens; check them against each provider's current price list. Tier (local/free/discount/standard/premium) is a label used by budget and max-tier filters. A note's front matter can pick its route: `route: X`, or words in priority/compute/mode/tags matched against `hints` (first rule wins). Keys come only from the env var named in providers.json.",
+  "max_concurrent_calls": 8,
+  "turbo_presets": { "1": 10, "2": 30, "3": 60 },
+  "allowed_providers": [],
+  "output_token_cap": 8000,
+  "request_timeout_seconds": 300,
+  "temperature": 0.3,
+  "retry": { "attempts": 3, "base_seconds": 2, "max_seconds": 30, "cascade_on_429": true },
+
+  "default_route": "default",
+  "routes": {
+    "default": [
+      { "provider": "deepseek",  "model": "deepseek-chat",     "tier": "discount", "price_in": 0.28, "price_out": 0.42, "context_window": 128000 },
+      { "provider": "anthropic", "model": "claude-sonnet-5-5", "tier": "premium",  "price_in": 2.0,  "price_out": 10.0 }
+    ],
+    "reasoning": [
+      { "provider": "deepseek",  "model": "deepseek-reasoner", "tier": "discount", "price_in": 0.28, "price_out": 0.42, "context_window": 128000 },
+      { "provider": "anthropic", "model": "claude-opus-5-5",   "tier": "premium",  "price_in": 4.0,  "price_out": 20.0 }
+    ],
+    "free": [
+      { "provider": "openrouter", "model": "deepseek/deepseek-r1:free", "tier": "free", "daily_requests": 50 },
+      { "provider": "gemini",     "model": "gemini-2.5-flash",          "tier": "free", "daily_requests": 200 },
+      { "provider": "ollama",     "model": "llama3.1",                  "tier": "local" },
+      { "provider": "deepseek",   "model": "deepseek-chat",             "tier": "discount", "price_in": 0.28, "price_out": 0.42 }
+    ],
+    "local": [
+      { "provider": "ollama",   "model": "llama3.1",    "tier": "local" },
+      { "provider": "lmstudio", "model": "local-model", "tier": "local" }
+    ],
+    "premium": [
+      { "provider": "anthropic", "model": "claude-opus-5-5", "tier": "premium", "price_in": 4.0, "price_out": 20.0 },
+      { "provider": "deepseek",  "model": "deepseek-chat",   "tier": "discount", "price_in": 0.28, "price_out": 0.42 }
+    ],
+    "test": [
+      { "provider": "mock", "model": "mock-1", "tier": "local" }
+    ]
+  },
+  "hints": [
+    { "when": "deep",       "route": "reasoning" },
+    { "when": "premium",    "route": "premium" },
+    { "when": "final",      "route": "premium" },
+    { "when": "private",    "route": "local" },
+    { "when": "background", "route": "free" },
+    { "when": "draft",      "route": "free" },
+    { "when": "low",        "route": "free" }
+  ],
+  "cache": { "enabled": true },
+  "budget": { "daily_usd": 5.0 },
+  "ledger": { "store_prompts": false },
+  "context": { "top_k": 5, "max_chars": 6000 },
+  "server": { "port": 8790, "cors_origins": [] }
+}

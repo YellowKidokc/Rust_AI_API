@@ -1,0 +1,13 @@
+{
+  "deepseek":   { "base": "https://api.deepseek.com", "chat": "chat/completions", "key": "DEEPSEEK_API_KEY", "default_model": "deepseek-chat", "openai_compatible": true },
+  "openrouter": { "base": "https://openrouter.ai/api", "chat": "v1/chat/completions", "key": "OPENROUTER_API_KEY", "default_model": "deepseek/deepseek-chat", "openai_compatible": true,
+                  "headers": { "HTTP-Referer": "https://theophysics.pro", "X-Title": "forge" } },
+  "gemini":     { "base": "https://generativelanguage.googleapis.com/v1beta/openai", "chat": "chat/completions", "key": "GEMINI_API_KEY", "default_model": "gemini-2.5-flash", "openai_compatible": true },
+  "anthropic":  { "base": "https://api.anthropic.com", "chat": "v1/messages", "key": "ANTHROPIC_API_KEY", "default_model": "claude-sonnet-5-5", "openai_compatible": false, "wire": "anthropic" },
+  "openai":     { "base": "https://api.openai.com", "chat": "v1/chat/completions", "key": "OPENAI_API_KEY", "default_model": "gpt-4o-mini", "openai_compatible": true },
+  "xai":        { "base": "https://api.x.ai", "chat": "v1/chat/completions", "key": "XAI_API_KEY", "default_model": "grok-4", "openai_compatible": true },
+  "groq":       { "base": "https://api.groq.com/openai", "chat": "v1/chat/completions", "key": "GROQ_API_KEY", "default_model": "llama-3.3-70b-versatile", "openai_compatible": true },
+  "ollama":     { "base": "http://127.0.0.1:11434", "chat": "v1/chat/completions", "default_model": "llama3.1", "openai_compatible": true, "no_key": true },
+  "lmstudio":   { "base": "http://127.0.0.1:1234", "chat": "v1/chat/completions", "default_model": "local-model", "openai_compatible": true, "no_key": true },
+  "mock":       { "base": "mock://", "wire": "mock", "default_model": "mock-1", "no_key": true }
+}
