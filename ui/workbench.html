@@ -1,0 +1,629 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>API Workbench</title>
+<style>
+:root{
+  --bg:#0b0b0b;--surf:#121212;--surf2:#181818;--bd:#262626;--bd2:#333;
+  --tx:#e4e4e4;--mu:#8c8c8c;--mu2:#b0b0b0;--gold:#d4a937;--goldbg:#1c1607;--goldbd:#4a3a12;
+  --grn:#46c46a;--red:#e06464;--blu:#7fb0ff;--mono:'Cascadia Code',Consolas,ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.5 'Segoe UI',system-ui,sans-serif}
+button,input,select,textarea{font:inherit;color:inherit}
+button{background:var(--surf2);border:1px solid var(--bd2);border-radius:6px;padding:6px 12px;cursor:pointer}
+button:hover{border-color:var(--gold)}
+button.primary{background:var(--gold);color:#111;border-color:var(--gold);font-weight:700}
+button.ghost{background:transparent}
+button:disabled{opacity:.4;cursor:not-allowed}
+input,select,textarea{background:var(--bg);border:1px solid var(--bd2);border-radius:6px;padding:6px 8px}
+textarea{width:100%;min-height:140px;font-family:var(--mono);font-size:12.5px}
+label{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--mu)}
+header{position:sticky;top:0;z-index:10;background:var(--surf);border-bottom:1px solid var(--bd);padding:10px 16px;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+header h1{font-size:15px;margin:0;color:var(--gold);letter-spacing:.04em}
+.sp{flex:1}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--mu);margin-right:6px}
+.dot.up{background:var(--grn)}.dot.down{background:var(--red)}
+.badge{font-size:11px;border:1px solid var(--bd2);border-radius:4px;padding:2px 8px;color:var(--mu2)}
+main{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:14px;padding:14px 16px 80px}
+@media (max-width:1000px){main{grid-template-columns:1fr}}
+.panel{background:var(--surf);border:1px solid var(--bd);border-radius:8px;margin-bottom:14px}
+.ph{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--bd);flex-wrap:wrap}
+.ph h2{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--gold);margin:0}
+.pb{padding:12px}
+.tabs{display:flex;gap:4px;flex-wrap:wrap}
+.tab{background:transparent;border:1px solid transparent;color:var(--mu2)}
+.tab[aria-selected=true]{border-color:var(--goldbd);background:var(--goldbg);color:var(--gold);font-weight:700}
+.row{display:flex;gap:10px;align-items:end;flex-wrap:wrap}
+.row>div{display:flex;flex-direction:column;gap:3px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+.card{background:var(--surf2);border:1px solid var(--bd);border-radius:7px;padding:10px;display:flex;flex-direction:column;gap:6px}
+.card.off{opacity:.45}
+.card .t{font-weight:700}
+.card .m{font-size:11.5px;color:var(--mu);font-family:var(--mono)}
+.card .err{font-size:11.5px;color:var(--red)}
+.card .acts{display:flex;gap:4px;flex-wrap:wrap}
+.card .acts button{padding:3px 8px;font-size:12px}
+.stage{font-family:var(--mono);font-size:11px;color:var(--gold)}
+.stages{display:flex;gap:8px;flex-wrap:wrap;align-items:stretch}
+.stg{flex:1 1 150px;border:1px dashed var(--bd2);border-radius:7px;padding:8px}
+.stg h3{margin:0 0 4px;font-size:11px;color:var(--gold);font-family:var(--mono)}
+.stg div{font-size:12px;color:var(--mu2)}
+.arrow{align-self:center;color:var(--mu)}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--mu);border-bottom:1px solid var(--bd2);padding:6px}
+td{border-bottom:1px solid var(--bd);padding:6px;vertical-align:top}
+td.mono{font-family:var(--mono);font-size:11.5px}
+.ok{color:var(--grn)}.bad{color:var(--red)}.cache{color:var(--blu)}
+.drop{border:1px dashed var(--bd2);border-radius:7px;padding:14px;text-align:center;color:var(--mu)}
+.drop.over{border-color:var(--gold);color:var(--gold)}
+.log{font-family:var(--mono);font-size:11.5px;max-height:320px;overflow:auto;white-space:pre-wrap;color:var(--mu2)}
+dialog{background:var(--surf);color:var(--tx);border:1px solid var(--goldbd);border-radius:10px;width:min(820px,94vw);padding:0}
+dialog::backdrop{background:rgba(0,0,0,.65)}
+dialog form{display:flex;flex-direction:column;gap:10px;padding:16px}
+dialog .row>div{flex:1 1 140px}
+.hint{font-size:11.5px;color:var(--mu)}
+pre.out{white-space:pre-wrap;font-family:var(--mono);font-size:12px;max-height:60vh;overflow:auto;background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:10px}
+.foot{position:fixed;bottom:0;left:0;right:0;background:var(--surf);border-top:1px solid var(--bd);padding:8px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.foot .stat{font-size:12px;color:var(--mu2)}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>API WORKBENCH</h1>
+  <span class="badge" id="packName">pack</span>
+  <span class="badge"><span class="dot" id="gwDot"></span><span id="gwTxt">gateway</span></span>
+  <span class="sp"></span>
+  <div class="row">
+    <div><label for="gwUrl">Gateway</label><input id="gwUrl" size="22"></div>
+    <div><label for="gRoute">Default route</label><select id="gRoute"></select></div>
+    <div><label for="gPar">At once</label><input id="gPar" type="number" min="1" max="30" style="width:70px"></div>
+  </div>
+  <button id="btnImport">Import pack</button>
+  <button id="btnExport">Export pack</button>
+  <input type="file" id="importFile" accept=".json,application/json" hidden>
+</header>
+
+<main>
+<section>
+  <!-- PAGES + STATIONS -->
+  <div class="panel">
+    <div class="ph">
+      <h2>Stations</h2>
+      <div class="tabs" id="tabs" role="tablist"></div>
+      <span class="sp"></span>
+      <button id="btnAddPage" class="ghost">+ Page</button>
+      <button id="btnAddStation">+ Station</button>
+    </div>
+    <div class="pb">
+      <div class="row" style="margin-bottom:10px">
+        <div><label for="pRoute">This page's route</label><select id="pRoute"></select></div>
+        <div><label for="pName">Page name</label><input id="pName" size="16"></div>
+        <span class="hint" id="pCount"></span>
+      </div>
+      <div class="grid" id="cards"></div>
+    </div>
+  </div>
+
+  <!-- PIPELINE -->
+  <div class="panel">
+    <div class="ph"><h2>Pipeline</h2>
+      <label for="kindView" style="margin-left:6px">for kind</label><select id="kindView"></select>
+      <span class="hint">Stages run in order. Stations inside a stage run side by side; the next stage waits for all of them.</span>
+    </div>
+    <div class="pb"><div class="stages" id="stages"></div></div>
+  </div>
+
+  <!-- THREAD -->
+  <div class="panel">
+    <div class="ph"><h2>Thread</h2><span class="sp"></span><span class="hint" id="costTotal">$0.00000</span>
+      <button id="btnClearThread" class="ghost">Clear</button></div>
+    <div class="pb" style="overflow:auto">
+      <table><thead><tr><th>Time</th><th>Paper</th><th>Stage</th><th>Station</th><th>Route · model</th><th>Cost</th><th>ms</th><th>Status</th><th></th></tr></thead>
+      <tbody id="thread"></tbody></table>
+    </div>
+  </div>
+</section>
+
+<aside>
+  <div class="panel">
+    <div class="ph"><h2>Papers</h2><span class="sp"></span><button id="btnClearDocs" class="ghost">Clear</button></div>
+    <div class="pb">
+      <div class="drop" id="drop">Drop .md / .txt files here<br>
+        <button id="btnFiles" style="margin-top:8px">Pick files</button>
+        <button id="btnFolder" style="margin-top:8px">Pick folder</button>
+      </div>
+      <input type="file" id="fileIn" multiple accept=".md,.txt,.markdown,text/plain,text/markdown" hidden>
+      <input type="file" id="dirIn" webkitdirectory multiple hidden>
+      <p class="hint">Originals are never changed. Each paper's kind comes from <code>kind:</code> in its front matter, or is guessed; change it here.</p>
+      <table><thead><tr><th><input type="checkbox" id="allDocs" aria-label="Select all" checked></th><th>Paper</th><th>Kind</th><th>Done</th></tr></thead><tbody id="docs"></tbody></table>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="ph"><h2>Log</h2></div>
+    <div class="pb"><div class="log" id="log"></div></div>
+  </div>
+</aside>
+</main>
+
+<div class="foot">
+  <button class="primary" id="btnRun">Run pipeline</button>
+  <button id="btnDry">Dry run</button>
+  <label style="display:flex;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-size:13px;color:var(--mu2)"><input type="checkbox" id="redo"> Redo (ignore cache)</label>
+  <button id="btnStop" disabled>Stop</button>
+  <button id="btnSave">Save output folder</button>
+  <span class="sp"></span>
+  <span class="stat" id="runStat">idle</span>
+</div>
+
+<!-- STATION EDITOR -->
+<dialog id="dlg">
+  <form method="dialog" id="dlgForm">
+    <h2 style="margin:0;font-size:14px;color:var(--gold)">Station</h2>
+    <div class="row">
+      <div><label for="fId">Id (letters, digits, _)</label><input id="fId" required pattern="[A-Za-z0-9_]+"></div>
+      <div><label for="fName">Name</label><input id="fName" required></div>
+      <div><label for="fStage">Stage</label><input id="fStage" type="number" min="1" max="20" required></div>
+    </div>
+    <div class="row">
+      <div><label for="fPage">Page</label><select id="fPage"></select></div>
+      <div><label for="fRoute">Route (blank = page)</label><select id="fRoute"></select></div>
+      <div><label for="fKinds">Kinds (comma, * = all)</label><input id="fKinds"></div>
+      <div><label for="fJson">Reply</label><select id="fJson"><option value="false">Text</option><option value="true">JSON</option></select></div>
+    </div>
+    <div><label for="fSystem">System</label><textarea id="fSystem" style="min-height:60px"></textarea></div>
+    <div><label for="fPrompt">Prompt</label><textarea id="fPrompt"></textarea>
+      <div class="hint">Variables: <code>{{document}}</code> <code>{{title}}</code> <code>{{kind}}</code> <code>{{related}}</code> <code>{{prior.ID}}</code> (the result of station ID from an earlier stage). Anything else is an error.</div>
+      <div class="err" id="fErr" style="color:var(--red);font-size:12px"></div></div>
+    <div class="row" style="justify-content:flex-end">
+      <button value="delete" id="fDelete" class="ghost" style="color:var(--red)">Delete</button>
+      <span class="sp"></span>
+      <button value="cancel" formnovalidate>Cancel</button>
+      <button value="save" class="primary" id="fSave">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="outDlg"><form method="dialog"><h2 style="margin:0;font-size:14px;color:var(--gold)" id="outTitle"></h2><pre class="out" id="outBody"></pre><div class="row" style="justify-content:flex-end"><button value="close">Close</button></div></form></dialog>
+
+<script>
+"use strict";
+/* ============================================================
+   API PACK: everything this page does is data. Export it, edit
+   it, import it into another copy of this page.
+   ============================================================ */
+const DEFAULT_PACK = {
+  pack: "Theophysics API Pack",
+  version: 1,
+  gateway: "http://127.0.0.1:8790",
+  route: "default",
+  parallel: 5,
+  kinds: ["paper", "theology", "ckg", "youtube"],
+  pages: [
+    { name: "Intake", route: "" },
+    { name: "CKG", route: "" },
+    { name: "Theology", route: "" },
+    { name: "YouTube", route: "free" },
+    { name: "Academia", route: "" }
+  ],
+  stations: [
+    { id: "title", name: "Standard title", page: "Intake", stage: 1, kinds: ["*"], json: true, route: "", enabled: true,
+      system: "You title research documents. Reply with JSON only.",
+      prompt: "Give this document a standard title.\nReturn {\"title\":\"...\",\"keywords\":[\"specific\",\"keywords\"],\"move\":\"what the piece does in 3-6 words\"}.\nNever use generic keywords like Theology or Apologetics.\n\n{{document}}" },
+    { id: "ckg", name: "CKG deep", page: "CKG", stage: 2, kinds: ["paper", "ckg", "youtube"], json: false, route: "", enabled: true,
+      system: "You build a canonical knowledge graph from one document. Be exact; quote where you can.",
+      prompt: "Document: {{title}} ({{kind}})\n\nExtract the claims, axioms, evidence and the relations between them. For each claim give: what it rests on, its weakest link, and what would kill it. List every scripture used.\n\n{{document}}" },
+    { id: "theology", name: "Theology lens", page: "Theology", stage: 2, kinds: ["paper", "theology", "youtube"], json: false, route: "", enabled: true,
+      system: "You read documents through a theological lens: doctrine, scripture, tradition. Name where the argument is strong and where it overreaches.",
+      prompt: "Read {{title}} theologically. Which doctrines does it rest on, which scriptures carry weight, and where would a careful theologian push back?\n\n{{document}}" },
+    { id: "physics", name: "Physics lens", page: "CKG", stage: 2, kinds: ["paper", "ckg"], json: false, route: "", enabled: true,
+      system: "You check physics claims for correctness and mark analogy versus real isomorphism.",
+      prompt: "Check every physics claim in {{title}}. For each: correct as stated, correct only as analogy, or wrong, and why.\n\n{{document}}" },
+    { id: "yt_summary", name: "Video summary", page: "YouTube", stage: 2, kinds: ["youtube"], json: false, route: "", enabled: true,
+      system: "You summarize video transcripts for a researcher.",
+      prompt: "Summarize this transcript in 8 bullets, then list the 3 claims most worth checking.\n\n{{document}}" },
+    { id: "weakest", name: "Weakest link", page: "Academia", stage: 3, kinds: ["paper", "ckg", "theology"], json: false, route: "reasoning", enabled: true,
+      system: "You find the single weakest link in an argument and what breaks downstream if it fails.",
+      prompt: "Using the knowledge graph and the theology reading below, name the single weakest link in {{title}}, what breaks if it fails, and the smallest fix.\n\nKNOWLEDGE GRAPH:\n{{prior.ckg}}\n\nTHEOLOGY:\n{{prior.theology}}" },
+    { id: "report", name: "Report", page: "Academia", stage: 4, kinds: ["*"], json: false, route: "", enabled: true,
+      system: "You write a one-page report for the author. Plain words, no padding.",
+      prompt: "Write a one-page report on {{title}}: what it claims, how well it holds, the weakest link, and the next thing to do.\n\nTITLE:\n{{prior.title}}\n\nGRAPH:\n{{prior.ckg}}\n\nWEAKEST LINK:\n{{prior.weakest}}\n\nRELATED FILES: {{related}}" }
+  ]
+};
+
+const STORE_KEY = "apiWorkbench.pack.v1";
+const $ = id => document.getElementById(id);
+let pack = loadPack();
+let page = pack.pages[0] ? pack.pages[0].name : "";
+let routes = [];
+const docs = [];              // {name, text, sha, kind, related[], selected, results:{stationId:{text,cost,route,model,cached}}}
+const thread = [];            // rows for THREAD.md and manifest
+let running = false, stopFlag = false;
+
+/* ---------- storage ---------- */
+function loadPack() {
+  try { const raw = localStorage.getItem(STORE_KEY); if (raw) return normalize(JSON.parse(raw)); } catch (e) { /* storage blocked */ }
+  return normalize(structuredClone(DEFAULT_PACK));
+}
+function savePack() { try { localStorage.setItem(STORE_KEY, JSON.stringify(pack)); } catch (e) { /* ok */ } }
+function normalize(p) {
+  p.pages = p.pages || []; p.stations = p.stations || []; p.kinds = p.kinds || ["paper"];
+  p.parallel = Math.min(30, Math.max(1, +p.parallel || 5)); p.route = p.route || "default";
+  p.gateway = (p.gateway || "http://127.0.0.1:8790").replace(/\/+$/, "");
+  for (const s of p.stations) { s.kinds = s.kinds && s.kinds.length ? s.kinds : ["*"]; s.enabled = s.enabled !== false; s.stage = +s.stage || 1; s.route = s.route || ""; }
+  return p;
+}
+
+/* ---------- small helpers ---------- */
+const log = m => { const el = $("log"); el.textContent += `${new Date().toLocaleTimeString()}  ${m}\n`; el.scrollTop = el.scrollHeight; };
+const el = (tag, props = {}, ...kids) => { const n = document.createElement(tag); Object.assign(n, props); for (const k of kids) n.append(k); return n; };
+async function sha256(text) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+function frontMatter(text) {
+  const m = /^﻿?---\r?\n([\s\S]*?)\r?\n---/.exec(text); const out = {};
+  if (!m) return out;
+  let key = null;
+  for (const line of m[1].split(/\r?\n/)) {
+    const item = /^\s+-\s+(.*)$/.exec(line);
+    if (item && key) { (out[key] = Array.isArray(out[key]) ? out[key] : []).push(item[1].trim()); continue; }
+    const kv = /^([A-Za-z_][\w-]*):\s*(.*)$/.exec(line);
+    if (kv) { key = kv[1].toLowerCase(); let v = kv[2].trim();
+      if (/^\[.*\]$/.test(v)) v = v.slice(1, -1).split(",").map(x => x.trim().replace(/^['"]|['"]$/g, "")).filter(Boolean);
+      else v = v.replace(/^['"]|['"]$/g, "");
+      out[key] = v; }
+  }
+  return out;
+}
+function guessKind(name, fm) {
+  const k = (fm.kind || fm.type || "").toString().toLowerCase();
+  if (pack.kinds.includes(k)) return k;
+  const n = name.toLowerCase();
+  if (/youtube|transcript|\byt\b/.test(n)) return pack.kinds.includes("youtube") ? "youtube" : pack.kinds[0];
+  if (/ckg/.test(n)) return pack.kinds.includes("ckg") ? "ckg" : pack.kinds[0];
+  return pack.kinds.includes("paper") ? "paper" : pack.kinds[0];
+}
+const stem = n => n.replace(/\.[^.]+$/, "");
+const safe = n => n.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 90) || "untitled";
+
+/* ---------- templates ---------- */
+const VAR_RE = /\{\{\s*([\w.]+)\s*\}\}/g;
+function templateErrors(st) {
+  const errs = [], ids = new Map(pack.stations.map(s => [s.id, s]));
+  for (const [, v] of st.prompt.matchAll(VAR_RE)) {
+    if (["document", "title", "kind", "related"].includes(v)) continue;
+    const m = /^prior\.(\w+)$/.exec(v);
+    if (!m) { errs.push(`unknown variable {{${v}}}`); continue; }
+    const src = ids.get(m[1]);
+    if (!src) errs.push(`{{${v}}}: no station "${m[1]}"`);
+    else if (src.stage >= st.stage) errs.push(`{{${v}}}: "${m[1]}" is stage ${src.stage}, must be earlier than ${st.stage}`);
+  }
+  return errs;
+}
+function render(st, doc) {
+  const title = (doc.results.title && tryTitle(doc.results.title.text)) || stem(doc.name);
+  return st.prompt.replace(VAR_RE, (_, v) => {
+    if (v === "document") return doc.text;
+    if (v === "title") return title;
+    if (v === "kind") return doc.kind;
+    if (v === "related") return doc.related.join(", ") || "(none)";
+    const id = v.slice(6); const r = doc.results[id];
+    return r ? r.text : "(not run for this kind)";
+  });
+}
+function needs(st) { return [...st.prompt.matchAll(VAR_RE)].map(m => m[1]).filter(v => v.startsWith("prior.")).map(v => v.slice(6)); }
+function tryTitle(t) { try { const j = JSON.parse(t.replace(/^```(json)?|```$/g, "")); return j.title || null; } catch { return null; } }
+
+/* ---------- pipeline ---------- */
+function applies(st, kind) { return st.enabled && (st.kinds.includes("*") || st.kinds.includes(kind)); }
+function stagesFor(kind) {
+  const by = new Map();
+  for (const s of pack.stations) if (applies(s, kind)) { if (!by.has(s.stage)) by.set(s.stage, []); by.get(s.stage).push(s); }
+  return [...by.entries()].sort((a, b) => a[0] - b[0]);
+}
+function routeFor(st) {
+  const pg = pack.pages.find(p => p.name === st.page);
+  return st.route || (pg && pg.route) || pack.route;
+}
+class Gate { // at most n calls at once, across every paper
+  constructor(n) { this.n = n; this.busy = 0; this.q = []; }
+  async run(fn) { if (this.busy >= this.n) await new Promise(r => this.q.push(r)); this.busy++;
+    try { return await fn(); } finally { this.busy--; const next = this.q.shift(); if (next) next(); } }
+}
+
+async function runPipeline(dry) {
+  const chosen = docs.filter(d => d.selected);
+  if (!chosen.length) { log("No papers selected."); return; }
+  const bad = pack.stations.filter(s => s.enabled && templateErrors(s).length);
+  if (bad.length) { log(`Fix these stations first: ${bad.map(s => s.id).join(", ")}`); return; }
+  running = true; stopFlag = false; syncButtons();
+  const gate = new Gate(pack.parallel);
+  const redo = $("redo").checked;
+  log(`${dry ? "Dry run" : "Run"}: ${chosen.length} paper(s), ${pack.parallel} at once.`);
+  await Promise.all(chosen.map(doc => runDoc(doc, gate, dry, redo)));
+  running = false; syncButtons();
+  $("runStat").textContent = stopFlag ? "stopped" : "done";
+  log(stopFlag ? "Stopped. Finished work is kept." : "Done.");
+  renderDocs(); savePack();
+}
+
+async function runDoc(doc, gate, dry, redo) {
+  for (const [stage, sts] of stagesFor(doc.kind)) {
+    if (stopFlag) return;
+    await Promise.all(sts.map(st => gate.run(async () => {
+      if (stopFlag) return;
+      // Barrier: a station that reads {{prior.X}} waits for X. If X applies to this paper but has no result, it's blocked.
+      const missing = needs(st).filter(id => { const src = pack.stations.find(x => x.id === id); return src && applies(src, doc.kind) && !doc.results[id]; });
+      if (missing.length) { addRow(doc, stage, st, routeFor(st), "-", 0, 0, `BLOCKED: needs ${missing.join(", ")}`, null); return; }
+      const prompt = render(st, doc), route = routeFor(st);
+      const key = await sha256(doc.sha + "\0" + st.id + "\0" + st.system + "\0" + prompt + "\0" + route + "\0" + st.json);
+      const prev = doc.results[st.id];
+      if (!redo && prev && prev.key === key) { addRow(doc, stage, st, route, prev.model, 0, 0, "SKIPPED (unchanged)", null); return; }
+      if (dry) { addRow(doc, stage, st, route, "-", 0, 0, "DRY RUN", { text: `[system]\n${st.system}\n\n[prompt]\n${prompt}` }); return; }
+      $("runStat").textContent = `${doc.name}: stage ${stage} · ${st.name}`;
+      const t0 = performance.now();
+      try {
+        const r = await fetch(pack.gateway + "/api/generate", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ prompt, system: st.system, route, json: !!st.json, no_cache: redo })
+        });
+        const body = await r.json().catch(() => ({}));
+        const ms = Math.round(performance.now() - t0);
+        if (!r.ok) {
+          const msg = (body.error && (body.error.message || body.error)) || `HTTP ${r.status}`;
+          addRow(doc, stage, st, route, "-", 0, ms, "FAILED: " + msg, null); log(`${doc.name} / ${st.id}: ${msg}`); return;
+        }
+        const res = { text: body.response, cost: body.cost_usd || 0, route: body.route, model: `${body.provider} / ${body.model}`, cached: !!body.cached, key, stage };
+        doc.results[st.id] = res;
+        addRow(doc, stage, st, body.route, res.model, res.cost, ms, res.cached ? "CACHED" : "OK", res);
+      } catch (e) {
+        addRow(doc, stage, st, route, "-", 0, Math.round(performance.now() - t0), "FAILED: " + e.message, null);
+        log(`${doc.name} / ${st.id}: gateway unreachable (${e.message})`);
+      }
+    })));
+  }
+  renderDocs();
+}
+
+/* ---------- thread ---------- */
+function addRow(doc, stage, st, route, model, cost, ms, status, res) {
+  const row = { at: new Date().toISOString(), paper: doc.name, paper_sha: doc.sha, stage, station: st.id, station_name: st.name, route, model, cost, ms, status };
+  thread.push(row);
+  const ok = /^OK|CACHED|SKIPPED|DRY/.test(status);
+  const tr = el("tr", {},
+    el("td", { className: "mono", textContent: new Date(row.at).toLocaleTimeString() }),
+    el("td", { textContent: doc.name }),
+    el("td", { className: "mono", textContent: String(stage) }),
+    el("td", { textContent: st.name }),
+    el("td", { className: "mono", textContent: `${route || "-"} · ${model}` }),
+    el("td", { className: "mono", textContent: "$" + cost.toFixed(5) }),
+    el("td", { className: "mono", textContent: String(ms) }),
+    el("td", { className: status === "CACHED" ? "cache" : ok ? "ok" : "bad", textContent: status }),
+    el("td", {}, res ? el("button", { textContent: "View", className: "ghost", onclick: () => show(`${doc.name} · ${st.name}`, res.text) }) : ""));
+  $("thread").prepend(tr);
+  $("costTotal").textContent = "$" + thread.reduce((a, r) => a + r.cost, 0).toFixed(5);
+}
+function show(title, text) { $("outTitle").textContent = title; $("outBody").textContent = text; $("outDlg").showModal(); }
+
+/* ---------- output folder ---------- */
+function threadMd(doc) {
+  const rows = thread.filter(r => r.paper === doc.name);
+  return `# Thread: ${doc.name}\n\nOriginal SHA-256: \`${doc.sha}\`  \nKind: ${doc.kind}\n\n| Time | Stage | Station | Route · model | Cost | ms | Status |\n|---|---|---|---|---|---|---|\n` +
+    rows.map(r => `| ${r.at} | ${r.stage} | ${r.station_name} | ${r.route || "-"} · ${r.model} | $${r.cost.toFixed(5)} | ${r.ms} | ${r.status} |`).join("\n") +
+    `\n\nTotal: $${rows.reduce((a, r) => a + r.cost, 0).toFixed(5)}\n`;
+}
+async function manifest(doc) {
+  const out = { paper: doc.name, kind: doc.kind, original_sha256: doc.sha, related: doc.related, pack: pack.pack, created: new Date().toISOString(), stations: [] };
+  for (const [stage, sts] of stagesFor(doc.kind)) for (const st of sts) {
+    const r = doc.results[st.id];
+    out.stations.push({ stage, id: st.id, name: st.name, prompt_sha256: await sha256(st.system + "\0" + st.prompt),
+      result: r ? { file: fileFor(stage, st), sha256: await sha256(r.text), route: r.route, model: r.model, cost_usd: r.cost, cached: r.cached } : null });
+  }
+  out.total_cost_usd = out.stations.reduce((a, s) => a + (s.result ? s.result.cost_usd : 0), 0);
+  return out;
+}
+const fileFor = (stage, st) => `${String(stage).padStart(2, "0")} ${safe(st.name)}.md`;
+
+async function saveOutputs() {
+  const done = docs.filter(d => Object.keys(d.results).length);
+  if (!done.length) { log("Nothing to save yet."); return; }
+  if (!("showDirectoryPicker" in window)) { return downloadFallback(done); }
+  let root;
+  try { root = await window.showDirectoryPicker({ mode: "readwrite" }); } catch { log("Save cancelled."); return; }
+  for (const doc of done) {
+    const dir = await root.getDirectoryHandle(safe(stem(doc.name)), { create: true });
+    await writeFile(dir, "00 ORIGINAL.md", doc.text);
+    for (const [stage, sts] of stagesFor(doc.kind)) for (const st of sts) {
+      const r = doc.results[st.id]; if (r) await writeFile(dir, fileFor(stage, st), r.text);
+    }
+    await writeFile(dir, "THREAD.md", threadMd(doc));
+    await writeFile(dir, "manifest.json", JSON.stringify(await manifest(doc), null, 2));
+    log(`Saved ${safe(stem(doc.name))}/`);
+  }
+}
+async function writeFile(dir, name, text) {
+  const fh = await dir.getFileHandle(name, { create: true }); const w = await fh.createWritable(); await w.write(text); await w.close();
+}
+async function downloadFallback(done) {
+  // Browsers without folder access get one bundle file per paper.
+  for (const doc of done) {
+    const bundle = { manifest: await manifest(doc), thread: threadMd(doc), original: doc.text, results: doc.results };
+    const a = el("a", { href: URL.createObjectURL(new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" })), download: `${safe(stem(doc.name))}.bundle.json` });
+    a.click(); URL.revokeObjectURL(a.href);
+  }
+  log("This browser can't write folders; downloaded one bundle per paper instead (use Edge or Chrome for folders).");
+}
+
+/* ---------- papers ---------- */
+async function addFiles(files) {
+  for (const f of files) {
+    if (!/\.(md|txt|markdown)$/i.test(f.name)) continue;
+    const text = await f.text(), fm = frontMatter(text);
+    const name = f.webkitRelativePath || f.name;
+    if (docs.some(d => d.name === name)) continue;
+    const related = [].concat(fm.related || []).map(String);
+    docs.push({ name, text, sha: await sha256(text), kind: guessKind(f.name, fm), related, selected: true, results: {} });
+  }
+  renderDocs(); log(`${docs.length} paper(s) loaded.`);
+}
+function renderDocs() {
+  const tb = $("docs"); tb.replaceChildren();
+  for (const d of docs) {
+    const kind = el("select", { onchange: e => { d.kind = e.target.value; renderStages(); } });
+    for (const k of pack.kinds) kind.append(el("option", { value: k, textContent: k, selected: k === d.kind }));
+    const want = stagesFor(d.kind).reduce((a, [, s]) => a + s.length, 0);
+    const have = stagesFor(d.kind).reduce((a, [, s]) => a + s.filter(x => d.results[x.id]).length, 0);
+    tb.append(el("tr", {},
+      el("td", {}, el("input", { type: "checkbox", checked: d.selected, onchange: e => d.selected = e.target.checked, ariaLabel: "select " + d.name })),
+      el("td", { textContent: d.name, title: "SHA-256 " + d.sha }),
+      el("td", {}, kind),
+      el("td", { className: "mono", textContent: `${have}/${want}` })));
+  }
+}
+
+/* ---------- stations UI ---------- */
+function renderTabs() {
+  const t = $("tabs"); t.replaceChildren();
+  for (const p of pack.pages) t.append(el("button", { className: "tab", role: "tab", textContent: p.name, ariaSelected: String(p.name === page), onclick: () => { page = p.name; renderAll(); } }));
+}
+function renderCards() {
+  const pg = pack.pages.find(p => p.name === page) || pack.pages[0];
+  if (!pg) { $("cards").replaceChildren(el("p", { className: "hint", textContent: "No pages yet: add one." })); return; }
+  $("pName").value = pg.name; fillRoutes($("pRoute"), pg.route, "(default route)");
+  const list = pack.stations.filter(s => s.page === pg.name);
+  $("pCount").textContent = `${list.length} of 20 on this page`;
+  const c = $("cards"); c.replaceChildren();
+  for (const s of list) {
+    const errs = templateErrors(s);
+    c.append(el("div", { className: "card" + (s.enabled ? "" : " off") },
+      el("div", { className: "stage", textContent: `STAGE ${s.stage}` }),
+      el("div", { className: "t", textContent: s.name }),
+      el("div", { className: "m", textContent: `${s.id} · ${s.kinds.join(",")} · ${routeFor(s)}${s.json ? " · json" : ""}` }),
+      errs.length ? el("div", { className: "err", textContent: errs.join("; ") }) : "",
+      el("div", { className: "acts" },
+        el("button", { textContent: "Edit", onclick: () => edit(s) }),
+        el("button", { textContent: "Duplicate", onclick: () => duplicate(s) }),
+        el("button", { textContent: s.enabled ? "Turn off" : "Turn on", onclick: () => { s.enabled = !s.enabled; savePack(); renderAll(); } }))));
+  }
+}
+function renderStages() {
+  const sel = $("kindView"), cur = sel.value || pack.kinds[0];
+  sel.replaceChildren(...pack.kinds.map(k => el("option", { value: k, textContent: k, selected: k === cur })));
+  const box = $("stages"); box.replaceChildren();
+  const st = stagesFor(sel.value || pack.kinds[0]);
+  st.forEach(([n, sts], i) => {
+    if (i) box.append(el("span", { className: "arrow", textContent: "→" }));
+    box.append(el("div", { className: "stg" }, el("h3", { textContent: `STAGE ${n}` }), ...sts.map(s => el("div", { textContent: `${s.name} · ${routeFor(s)}` }))));
+  });
+  if (!st.length) box.append(el("p", { className: "hint", textContent: "No stations apply to this kind." }));
+}
+function fillRoutes(select, value, blankLabel) {
+  select.replaceChildren();
+  if (blankLabel !== null) select.append(el("option", { value: "", textContent: blankLabel }));
+  const names = [...new Set([...routes, value].filter(Boolean))];
+  for (const r of names) select.append(el("option", { value: r, textContent: r, selected: r === value }));
+}
+function renderAll() {
+  $("packName").textContent = pack.pack; $("gwUrl").value = pack.gateway; $("gPar").value = pack.parallel;
+  fillRoutes($("gRoute"), pack.route, null);
+  renderTabs(); renderCards(); renderStages(); renderDocs();
+}
+
+let editing = null;
+function edit(s, draft = s) {
+  editing = s; fillForm(draft);
+  $("fDelete").hidden = !pack.stations.includes(s);
+  $("dlg").showModal();
+}
+function fillForm(s) {
+  $("fId").value = s.id; $("fName").value = s.name; $("fStage").value = s.stage; $("fKinds").value = s.kinds.join(", ");
+  $("fJson").value = String(!!s.json); $("fSystem").value = s.system || ""; $("fPrompt").value = s.prompt || ""; $("fErr").textContent = "";
+  $("fPage").replaceChildren(...pack.pages.map(p => el("option", { value: p.name, textContent: p.name, selected: p.name === s.page })));
+  fillRoutes($("fRoute"), s.route, "(page route)");
+}
+$("dlg").addEventListener("close", () => {
+  const v = $("dlg").returnValue, s = editing; editing = null;
+  if (v === "delete") { pack.stations = pack.stations.filter(x => x !== s); savePack(); renderAll(); return; }
+  if (v !== "save") return;
+  const next = { ...s, id: $("fId").value.trim(), name: $("fName").value.trim(), stage: +$("fStage").value, page: $("fPage").value,
+    route: $("fRoute").value, kinds: $("fKinds").value.split(",").map(x => x.trim()).filter(Boolean), json: $("fJson").value === "true",
+    system: $("fSystem").value, prompt: $("fPrompt").value, enabled: s.enabled !== false };
+  if (!next.kinds.length) next.kinds = ["*"];
+  if (pack.stations.some(x => x !== s && x.id === next.id)) { log(`Station id "${next.id}" is taken; pick another.`); return edit(s, next); }
+  const i = pack.stations.indexOf(s);
+  if (i >= 0) pack.stations[i] = next; else pack.stations.push(next);
+  const errs = templateErrors(next);
+  if (errs.length) log(`${next.id}: ${errs.join("; ")}`);
+  savePack(); renderAll();
+});
+function duplicate(s) {
+  if (pack.stations.filter(x => x.page === s.page).length >= 20) { log("A page holds 20 stations; add a page."); return; }
+  let n = 2, id; do { id = `${s.id}_${n++}`; } while (pack.stations.some(x => x.id === id));
+  edit({ ...structuredClone(s), id, name: `${s.name} 2` });
+}
+
+/* ---------- gateway ---------- */
+async function checkGateway() {
+  try {
+    const r = await fetch(pack.gateway + "/health"); const h = await r.json();
+    routes = h.routes || []; $("gwDot").className = "dot up";
+    $("gwTxt").textContent = `forge · ${(h.providers_ready || []).join(", ") || "no providers ready"}`;
+  } catch (e) { routes = []; $("gwDot").className = "dot down"; $("gwTxt").textContent = "gateway unreachable: start forge serve"; }
+  renderAll();
+}
+
+/* ---------- wiring ---------- */
+function syncButtons() { $("btnRun").disabled = running; $("btnDry").disabled = running; $("btnStop").disabled = !running; $("btnSave").disabled = running; }
+$("btnRun").onclick = () => runPipeline(false);
+$("btnDry").onclick = () => runPipeline(true);
+$("btnStop").onclick = () => { stopFlag = true; $("runStat").textContent = "stopping after in-flight calls…"; };
+$("btnSave").onclick = saveOutputs;
+$("btnFiles").onclick = () => $("fileIn").click();
+$("btnFolder").onclick = () => $("dirIn").click();
+$("fileIn").onchange = e => addFiles(e.target.files);
+$("dirIn").onchange = e => addFiles(e.target.files);
+$("btnClearDocs").onclick = () => { docs.length = 0; renderDocs(); };
+$("btnClearThread").onclick = () => { thread.length = 0; $("thread").replaceChildren(); $("costTotal").textContent = "$0.00000"; };
+$("allDocs").onchange = e => { docs.forEach(d => d.selected = e.target.checked); renderDocs(); };
+const drop = $("drop");
+drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
+drop.ondragleave = () => drop.classList.remove("over");
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over"); addFiles(e.dataTransfer.files); };
+$("gwUrl").onchange = e => { pack.gateway = e.target.value.replace(/\/+$/, ""); savePack(); checkGateway(); };
+$("gRoute").onchange = e => { pack.route = e.target.value; savePack(); renderAll(); };
+$("gPar").onchange = e => { pack.parallel = Math.min(30, Math.max(1, +e.target.value || 1)); e.target.value = pack.parallel; savePack(); };
+$("pRoute").onchange = e => { const pg = pack.pages.find(p => p.name === page); if (pg) { pg.route = e.target.value; savePack(); renderAll(); } };
+$("pName").onchange = e => {
+  const pg = pack.pages.find(p => p.name === page), name = e.target.value.trim();
+  if (!pg || !name || pack.pages.some(p => p !== pg && p.name === name)) { e.target.value = page; return; }
+  pack.stations.forEach(s => { if (s.page === pg.name) s.page = name; }); pg.name = name; page = name; savePack(); renderAll();
+};
+$("kindView").onchange = renderStages;
+$("btnAddPage").onclick = () => { let n = pack.pages.length + 1, name; do { name = `Page ${n++}`; } while (pack.pages.some(p => p.name === name));
+  pack.pages.push({ name, route: "" }); page = name; savePack(); renderAll(); };
+$("btnAddStation").onclick = () => {
+  if (!pack.pages.length) { log("Add a page first."); return; }
+  if (pack.stations.filter(x => x.page === page).length >= 20) { log("A page holds 20 stations; add a page."); return; }
+  let n = 1, id; do { id = `station_${n++}`; } while (pack.stations.some(x => x.id === id));
+  edit({ id, name: "New station", page, stage: 2, kinds: ["*"], json: false, route: "", enabled: true, system: "", prompt: "{{document}}" });
+};
+$("btnExport").onclick = () => {
+  const a = el("a", { href: URL.createObjectURL(new Blob([JSON.stringify(pack, null, 2)], { type: "application/json" })), download: `${safe(pack.pack)}.json` });
+  a.click(); URL.revokeObjectURL(a.href);
+};
+$("btnImport").onclick = () => $("importFile").click();
+$("importFile").onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try { pack = normalize(JSON.parse(await f.text())); page = pack.pages[0] ? pack.pages[0].name : ""; savePack(); log(`Imported pack "${pack.pack}".`); checkGateway(); }
+  catch (err) { log("That file is not a valid pack: " + err.message); }
+  e.target.value = "";
+};
+
+renderAll(); checkGateway(); syncButtons();
+</script>
+</body>
+</html>
