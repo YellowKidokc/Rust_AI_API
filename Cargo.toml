@@ -1,0 +1,37 @@
+[workspace]
+resolver = "2"
+members = ["crates/forge-core", "crates/forge", "crates/semtag-core", "crates/semtag-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+anyhow = "1"
+async-trait = "0.1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+clap = { version = "4", features = ["derive"] }
+csv = "1"
+fastrand = "2"
+hex = "0.4"
+minijinja = "2"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+# preserve_order: semtag-core writes metadata back in the order it was read (byte-compatible notes).
+# Cargo unifies features, so forge sees insertion-ordered maps too; forge hashes via canon::canonical_json.
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+uuid = { version = "1", features = ["v4"] }
+semtag-core = { path = "crates/semtag-core" }
+forge-core = { path = "crates/forge-core" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

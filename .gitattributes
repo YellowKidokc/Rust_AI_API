@@ -1,0 +1,3 @@
+# semtag's golden fixtures are compared byte for byte (the plugin's note format).
+# Never convert their line endings on checkout, or Windows gets CRLF and the tests fail.
+crates/semtag-core/tests/fixtures/** -text

@@ -1,0 +1,13 @@
+[package]
+name = "semtag-core"
+description = "Types, tag-format parse/write, TSNS, and note rendering for semtag. No network I/O."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+csv.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true

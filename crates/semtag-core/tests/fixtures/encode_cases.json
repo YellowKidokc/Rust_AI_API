@@ -1,0 +1,18 @@
+[
+  {
+    "json": "{\"weakestLink\":\"step 2\",\"ok\":true,\"n\":0.85}",
+    "encoded": "%7B%22weakestLink%22%3A%22step%202%22%2C%22ok%22%3Atrue%2C%22n%22%3A0.85%7D"
+  },
+  {
+    "json": "{\"quote\":\"he said \\\"no\\\"\",\"pct\":\"100% sure\",\"amp\":\"A & B\",\"chi\":\"χ = coherence\",\"emoji\":\"faith 🙏😀\",\"nl\":\"line1\\nline2\\r\\nline3\"}",
+    "encoded": "%7B%22quote%22%3A%22he%20said%20%5C%22no%5C%22%22%2C%22pct%22%3A%22100%25%20sure%22%2C%22amp%22%3A%22A%20%26%20B%22%2C%22chi%22%3A%22%CF%87%20%3D%20coherence%22%2C%22emoji%22%3A%22faith%20%F0%9F%99%8F%F0%9F%98%80%22%2C%22nl%22%3A%22line1%5Cnline2%5Cr%5Cnline3%22%7D"
+  },
+  {
+    "json": "{\"arr\":[\"a; b\",1,false,null],\"nested\":{\"k\":\"!~*()'-_.\"},\"colon\":\"a::b:c\",\"tab\":\"x\\ty\"}",
+    "encoded": "%7B%22arr%22%3A%5B%22a%3B%20b%22%2C1%2Cfalse%2Cnull%5D%2C%22nested%22%3A%7B%22k%22%3A%22!~*()'-_.%22%7D%2C%22colon%22%3A%22a%3A%3Ab%3Ac%22%2C%22tab%22%3A%22x%5Cty%22%7D"
+  },
+  {
+    "json": "{\"greek\":\"Λόγος\",\"math\":\"∇βTαβ = 0\",\"cjk\":\"道\"}",
+    "encoded": "%7B%22greek%22%3A%22%CE%9B%CF%8C%CE%B3%CE%BF%CF%82%22%2C%22math%22%3A%22%E2%88%87%CE%B2T%CE%B1%CE%B2%20%3D%200%22%2C%22cjk%22%3A%22%E9%81%93%22%7D"
+  }
+]
