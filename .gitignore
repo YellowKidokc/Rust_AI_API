@@ -1,0 +1,6 @@
+target/
+INBOX/
+OUTBOX/
+STATE/
+paths.json
+.env
