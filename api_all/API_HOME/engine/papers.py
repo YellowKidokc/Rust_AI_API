@@ -75,18 +75,27 @@ def create(source: Path, *, title: str|None=None, paper_id: str|None=None, serie
 def _sources(folder: Path) -> list[Path]:
     return sorted(p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in SOURCE_TYPES and not p.name.startswith((".","~")))
 
-def intake(folder: Path, *, series: str="", group: str="", priority: bool=False, known: dict[str,Path]|None=None) -> list[Path]:
-    """Make paper folders for everything in `folder`, reading files in place (originals are never moved).
-    Inside it: 00_PRIORITY/ is taken first and marked priority; SERIES/<name>/ and GROUPS/<name>/ set the collection."""
-    folder=folder.expanduser().resolve(); made=[]
-    if not folder.is_dir(): raise NotADirectoryError(folder)
-    known=hash_index() if known is None else known
-    if (folder/"00_PRIORITY").is_dir(): made+=intake(folder/"00_PRIORITY",series=series,group=group,priority=True,known=known)
+def _plan(folder: Path, series: str, group: str, priority: bool) -> list[tuple[Path,dict]]:
+    """Every source under `folder` with its collection settings, priority first."""
+    plan=[]
+    if (folder/"00_PRIORITY").is_dir(): plan+=_plan(folder/"00_PRIORITY",series,group,True)
     for kind,dirname in KINDS.items():
         if (folder/dirname).is_dir():
             for sub in sorted(x for x in (folder/dirname).iterdir() if x.is_dir()):
-                made+=intake(sub,priority=priority,known=known,**{kind:sub.name})
-    for source in _sources(folder): made.append(create(source,series=series,group=group,priority=priority,known=known))
+                plan+=_plan(sub,sub.name if kind=="series" else "",sub.name if kind=="group" else "",priority)
+    return plan+[(source,{"series":series,"group":group,"priority":priority}) for source in _sources(folder)]
+
+def intake(folder: Path, *, series: str="", group: str="", priority: bool=False, known: dict[str,Path]|None=None,
+           limit: int|None=None) -> list[Path]:
+    """Make paper folders for everything in `folder`, reading files in place (originals are never moved).
+    Inside it: 00_PRIORITY/ is taken first and marked priority; SERIES/<name>/ and GROUPS/<name>/ set the collection.
+    `limit` caps how many NEW folders are made (already-made papers don't count), across all subfolders."""
+    folder=folder.expanduser().resolve(); made=[]; new=0
+    if not folder.is_dir(): raise NotADirectoryError(folder)
+    known=hash_index() if known is None else known
+    for source,kw in _plan(folder,series,group,priority):
+        if limit is not None and new>=limit: break
+        before=len(known); made.append(create(source,known=known,**kw)); new+=len(known)>before
     return made
 
 def _meta(paper: Path) -> dict:

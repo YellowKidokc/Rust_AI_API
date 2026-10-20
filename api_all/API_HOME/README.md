@@ -16,7 +16,7 @@ ONE_MENU.bat Y --limit 1
 ONE_MENU.bat find resurrection --min 5
 ```
 
-On macOS/Linux, the equivalent is `python API_HOME/engine/menu.py ...`.
+On macOS/Linux, the equivalent (from the repository root) is `python api_all/API_HOME/engine/menu.py ...`.
 
 ## Inbox, priority, series and groups
 

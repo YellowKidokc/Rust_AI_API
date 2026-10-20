@@ -59,15 +59,16 @@ def source(paper):
 def ai_bundle(paper:Path,label:str,prompts:list[tuple[str,str]],args):
  meta,path,text=source(paper); focus,focus_hash=compose(API_HOME/'stations'/label,paper,args.focus); src_hash=sha256_file(path)
  template=output_template(label,args.template); template_hash=hashlib.sha256(template.encode()).hexdigest() if template else ""
- checkpoint={"source_hash":src_hash,"prompt_version":"1","model":args.model,"focus_hash":focus_hash}
- if template: checkpoint["template_hash"]=template_hash
  vocab=vocabularies(label,args.vocab); opening=vocab_block(vocab)
- if vocab: checkpoint["vocab_hash"]=hashlib.sha256(opening.encode()).hexdigest()
+ # Everything that changes the answer: editing a prompt, template or vocabulary (or dropping one) reruns the paper.
+ checkpoint={"source_hash":src_hash,"prompt_version":"1","model":args.model,"provider":args.provider,"focus_hash":focus_hash,
+  "prompts_hash":hashlib.sha256(json.dumps(prompts,ensure_ascii=False).encode()).hexdigest(),"template_hash":template_hash,
+  "vocab_hash":hashlib.sha256(opening.encode()).hexdigest() if vocab else ""}
  if not args.redo:
   for prior in sorted((paper/"02_RUNS"/label).glob("*/"+label+".run.json"),reverse=True):
    saved=json.loads(prior.read_text(encoding="utf-8"))
    if all(saved.get(k)==v for k,v in checkpoint.items()) and not saved.get("errors"):
-    print(f"SKIP completed {paper}: {prior.parent}"); return
+    print(f"SKIP completed {paper}: {prior.parent}"); return True
  def one(entry):
   name,instruction=entry; prompt=append(opening+with_template(instruction,template,meta,src_hash)+'\n\nSOURCE DOCUMENT:\n'+text,focus); result=llm.call([{'role':'user','content':prompt}],provider=args.provider,model=args.model)
   if template and not result.error: result.text=after_call(result.text,result)
@@ -77,13 +78,17 @@ def ai_bundle(paper:Path,label:str,prompts:list[tuple[str,str]],args):
   futures=[pool.submit(one,p) for p in prompts]
   for f in as_completed(futures):
    name,result,prompt=f.result(); gathered[name]=result.text if not result.error else {'error':result.error}; receipts.append(llm.receipt(result,source_hash=src_hash,prompt_version='1',focus_text=focus,focus_hash=focus_hash,part=name,**(check_codes(result.text,vocab,template) if vocab and not result.error else {})))
- out=dated_run_dir(paper,label); receipt={'source_hash':src_hash,'model':args.model,'provider':args.provider,'prompt_version':'1','focus_text':focus,'focus_hash':focus_hash,**({'template_hash':template_hash} if template else {}),**({'vocab_hash':checkpoint['vocab_hash'],'codes_unknown':sorted({c for r in receipts for c in r.get('codes_unknown',[])})} if vocab else {}),'tokens':sum(r['tokens'] for r in receipts),'time_seconds':sum(r['elapsed_seconds'] for r in receipts),'errors':[r['error'] for r in receipts if r['error']],'calls':receipts}
- body='<h1>'+html.escape(label)+'</h1>'+''.join(f'<section><h2>{html.escape(k)}</h2><pre>{html.escape(v if isinstance(v,str) else json.dumps(v,indent=2))}</pre></section>' for k,v in gathered.items()); write_bundle(out,label,gathered,'<!doctype html><meta charset="utf-8">'+body,receipt,[{'part':k,'result':v if isinstance(v,str) else json.dumps(v)} for k,v in gathered.items()])
+ out=dated_run_dir(paper,label); receipt={**checkpoint,'focus_text':focus,**({'codes_unknown':sorted({c for r in receipts for c in r.get('codes_unknown',[])})} if vocab else {}),'tokens':sum(r['tokens'] for r in receipts),'time_seconds':sum(r['elapsed_seconds'] for r in receipts),'errors':[r['error'] for r in receipts if r['error']],'calls':receipts}
+ # Until every artifact is written the receipt says so; a crash midway leaves a run that is redone, never skipped.
+ pending={**receipt,'errors':receipt['errors']+['incomplete: run did not finish writing its outputs']}
+ body='<h1>'+html.escape(label)+'</h1>'+''.join(f'<section><h2>{html.escape(k)}</h2><pre>{html.escape(v if isinstance(v,str) else json.dumps(v,indent=2))}</pre></section>' for k,v in gathered.items()); write_bundle(out,label,gathered,'<!doctype html><meta charset="utf-8">'+body,pending,[{'part':k,'result':v if isinstance(v,str) else json.dumps(v)} for k,v in gathered.items()])
  if template:
   parts=[(k,v if isinstance(v,str) else '(call failed: '+v['error']+')') for k,v in gathered.items()]
   (out/f'{label}.md').write_text(parts[0][1] if len(parts)==1 else '\n\n'.join(f'# {k}\n\n{v}' for k,v in parts),encoding='utf-8')
  mirror(paper,meta,label,out)
- meta.setdefault('stations_run',[]).append({'station':label,'run':str(out.relative_to(paper))}); (paper/'paper.json').write_text(json.dumps(meta,indent=2),encoding='utf-8'); print(out)
+ meta.setdefault('stations_run',[]).append({'station':label,'run':str(out.relative_to(paper))}); (paper/'paper.json').write_text(json.dumps(meta,indent=2),encoding='utf-8')
+ (out/f'{label}.run.json').write_text(json.dumps(receipt,indent=2,ensure_ascii=False),encoding='utf-8'); print(out)
+ return not receipt['errors']
 
 def mirror(paper:Path,meta:dict,label:str,out:Path):
  """A paper in a series or group also gets a copy of this station's result in <collection>/_BY_STATION/<label>/,
@@ -96,10 +101,13 @@ def mirror(paper:Path,meta:dict,label:str,out:Path):
 def run_ai(label,prompts):
  args=arguments(label); papers=[x for x in discover(args.items,args.limit) if x.is_dir()]
  if args.dry_run:
-  print(json.dumps({'station':label,'papers':len(papers),'calls':len(papers)*len(prompts),'template':bool(output_template(label,args.template)),'vocabularies':len(vocabularies(label,args.vocab)),'workers':args.workers})); return
+  print(json.dumps({'station':label,'papers':len(papers),'calls':len(papers)*len(prompts),'template':bool(output_template(label,args.template)),'vocabularies':len(vocabularies(label,args.vocab)),'workers':args.workers})); return 0
  # Papers run side by side; the one process-wide limiter in engine.llm caps calls in flight at --workers.
  llm.configure(args.workers)
  def guarded(paper):
-  try: ai_bundle(paper,label,prompts,args)
-  except Exception as exc: print(f'{paper}: {type(exc).__name__}: {exc}')
- with ThreadPoolExecutor(max_workers=max(1,min(args.workers,len(papers)))) as pool: list(pool.map(guarded,papers))
+  try: return ai_bundle(paper,label,prompts,args)
+  except Exception as exc: print(f'{paper}: {type(exc).__name__}: {exc}'); return False
+ with ThreadPoolExecutor(max_workers=max(1,min(args.workers,len(papers)))) as pool: ok=list(pool.map(guarded,papers))
+ failed=ok.count(False)
+ if failed: print(f'{label}: {failed} of {len(papers)} paper(s) failed or have call errors; rerun to retry them')
+ return 1 if failed else 0  # stations pass this to SystemExit, so ONE_MENU counts the station as failed

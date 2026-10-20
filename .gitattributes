@@ -1,3 +1,6 @@
 # semtag's golden fixtures are compared byte for byte (the plugin's note format).
 # Never convert their line endings on checkout, or Windows gets CRLF and the tests fail.
 crates/semtag-core/tests/fixtures/** -text
+
+# cmd.exe can mis-find goto labels in LF-only batch files; check them out with CRLF.
+*.bat text eol=crlf

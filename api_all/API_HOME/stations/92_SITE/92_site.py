@@ -5,7 +5,7 @@ from engine.papers import discover
 from engine.site import build
 
 def main():
- p=argparse.ArgumentParser(description='Build the front side: dashboard, index.tsv, validation and one stacked page per paper')
+ p=argparse.ArgumentParser(description='Build the front side: dashboard, index.tsv, validation and one stacked page per paper (--item rewrites only those papers\' pages; the index always covers every paper)')
  p.add_argument('items',nargs='*'); p.add_argument('--limit',type=int)
  p.add_argument('--order',default='',help='stacking order of layers by station number, e.g. 49,40,41 (others follow)'); a=p.parse_args()
  papers=[x for x in discover(a.items,a.limit) if x.is_dir()] if a.items else None

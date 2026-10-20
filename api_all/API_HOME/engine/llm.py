@@ -92,14 +92,19 @@ def call(messages: list[dict[str,str]], *, provider="deepseek", model="deepseek-
         failed=False
         try:
             with limiter(): payload=_request(provider,model,messages,timeout)
-            usage=payload.get("usage",{}); choice=payload["choices"][0]["message"]["content"]
+            usage=payload.get("usage") or {}; choice=payload["choices"][0]["message"]["content"]
+            if not isinstance(choice,str): raise TypeError("response message has no text content")
+            served=str(payload.get("model") or model)  # through forge, the model that actually answered
             limiter().record(False)
-            return LLMResult(choice,provider,model,int(usage.get("prompt_tokens",0)),int(usage.get("completion_tokens",0)),attempt,time.monotonic()-start,started)
+            return LLMResult(choice,provider,served,int(usage.get("prompt_tokens",0)),int(usage.get("completion_tokens",0)),attempt,time.monotonic()-start,started)
         except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError, RuntimeError) as exc:
             last=f"{type(exc).__name__}: {exc}"; failed=True; limiter().record(True)
             retryable=not isinstance(exc,urllib.error.HTTPError) or exc.code==429 or exc.code>=500
             if attempt>=attempts or not retryable: break
             time.sleep(min(max_seconds,base_seconds*2**(attempt-1))*(.75+random.random()*.5))
+        except (KeyError, IndexError, TypeError, ValueError, AttributeError) as exc:
+            # A 200 with no usable answer (error envelope, non-JSON body, null content): not retried.
+            last=f"MalformedResponse: {type(exc).__name__}: {exc}"; limiter().record(True); break
     return LLMResult("",provider,model,0,0,attempt,time.monotonic()-start,started,last)
 
 async def acall(*args, **kwargs) -> LLMResult:

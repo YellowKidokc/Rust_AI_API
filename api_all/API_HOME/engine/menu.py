@@ -65,7 +65,11 @@ def run(argv=None):
   if args.redo and 'redo' in accepted: cmd.append('--redo')
   if 'vocab' in accepted:
    for v in args.vocab: cmd += ['--vocab',v]
-  if args.dry_run: cmd.append('--dry-run') if n not in {'44','46','47','90','91','92'} else None
+  if args.dry_run and n in {'44','46','47','90','91','92'}:
+   # These stations have no dry-run mode and write files (or call a provider): show the command, run nothing.
+   print(f"\n[{n}] {s['name']} (dry run: not executed)\n$ {' '.join(shlex.quote(x) for x in cmd)}")
+   results.append({'station':s['label'],'returncode':0,'skipped':'dry-run'}); continue
+  if args.dry_run: cmd.append('--dry-run')
   print(f"\n[{n}] {s['name']}\n$ {' '.join(shlex.quote(x) for x in cmd)}")
   completed=subprocess.run(cmd,cwd=API_HOME); results.append({'station':s['label'],'returncode':completed.returncode})
  elapsed=time.monotonic()-started; record={**plan,'started_at':datetime.now(timezone.utc).isoformat(),'elapsed_seconds':elapsed,'results':results}

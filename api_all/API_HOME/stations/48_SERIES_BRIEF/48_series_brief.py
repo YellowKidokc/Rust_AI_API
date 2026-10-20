@@ -32,7 +32,7 @@ def source_text(paper):
 
 def brief(folder,args):
  papers=members(folder)
- if not papers: print(f'{folder}: no papers'); return
+ if not papers: print(f'{folder}: no papers'); return True
  kind='series' if folder.parent.name=='SERIES' else 'group'
  paper_prompt,series_prompt=prompt_file('PAPER_PROMPT.md'),prompt_file('SERIES_PROMPT.md')
  focus,focus_hash=compose(HERE,None,args.focus)
@@ -41,9 +41,9 @@ def brief(folder,args):
  if not args.redo:
   for prior in sorted((folder/'_SERIES').glob(f'*/{LABEL}.run.json'),reverse=True):
    saved=json.loads(prior.read_text(encoding='utf-8'))
-   if saved.get('checkpoint')==key and not saved.get('errors'): print(f'SKIP unchanged {folder.name}: {prior.parent}'); return
+   if saved.get('checkpoint')==key and not saved.get('errors'): print(f'SKIP unchanged {folder.name}: {prior.parent}'); return True
  print(json.dumps({'collection':str(folder),'kind':kind,'papers':len(papers),'calls':len(papers)+1}))
- if args.dry_run: return
+ if args.dry_run: return True
  titles=[m.get('title') or p.name for p,(m,_) in zip(papers,metas)]
  def one(i):
   m,text=metas[i]
@@ -65,13 +65,16 @@ def brief(folder,args):
  (out/f'{LABEL}.run.json').write_text(json.dumps({'checkpoint':key,'model':args.model,'provider':args.provider,'focus_hash':focus_hash,
    'tokens':sum(r['tokens'] for r in receipts),'errors':errors,'calls':receipts},indent=2,ensure_ascii=False),encoding='utf-8')
  print(out)
+ return not errors
 
 def main():
  p=argparse.ArgumentParser(prog=LABEL); p.add_argument('items',nargs='*'); p.add_argument('--workers',type=int,default=30)
  p.add_argument('--provider',default='deepseek'); p.add_argument('--model',default='deepseek-chat'); p.add_argument('--focus',default='')
  p.add_argument('--redo',action='store_true'); p.add_argument('--dry-run',action='store_true'); args=p.parse_args()
- llm.configure(args.workers)
+ llm.configure(args.workers); failed=0
  for folder in collections(args.items):
-  try: brief(folder,args)
-  except Exception as exc: print(f'{folder}: {type(exc).__name__}: {exc}')
-if __name__=='__main__': main()
+  try: ok=brief(folder,args)
+  except Exception as exc: print(f'{folder}: {type(exc).__name__}: {exc}'); ok=False
+  failed+=not ok
+ return 1 if failed else 0  # ONE_MENU counts the station as failed
+if __name__=='__main__': raise SystemExit(main())

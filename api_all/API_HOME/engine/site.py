@@ -42,13 +42,20 @@ def scalar(v:str):
  except ValueError: return v
 
 def frontmatter(text:str)->dict:
- """The first --- ... --- block (plain front matter, or inside a ```yaml fence as the v0.3 layers write it). key: value lines only."""
- m=re.search(r"^---[ \t]*\n(.*?)\n---[ \t]*$",text,re.M|re.S)
- out={}
- for line in (m.group(1).splitlines() if m else []):
-  k,sep,v=line.partition(":")
-  if sep and not line.startswith((" ","\t","#")) and k.strip(): out[k.strip()]=scalar(v)
- return out
+ """The first --- ... --- block that holds key: value lines: plain front matter, or the ```yaml block the v0.3 layers
+ write (which sits after a --- horizontal rule, so the first pair of --- lines is not always the block)."""
+ lines=text.replace("\r\n","\n").split("\n"); marks=[i for i,l in enumerate(lines) if l.strip()=="---"]
+ def opens(i):  # a block starts the file, or opens a ```yaml fence; any other --- is a horizontal rule
+  before=[l.strip() for l in lines[:i] if l.strip()]
+  return not before or before[-1].lower() in ("```yaml","```yml")
+ for a,b in zip(marks,marks[1:]):
+  if not opens(a): continue
+  out={}
+  for line in lines[a+1:b]:
+   k,sep,v=line.partition(":")
+   if sep and not line.startswith((" ","\t","#")) and k.strip() and " " not in k.strip(): out[k.strip()]=scalar(v)
+  if out: return out
+ return {}
 
 def table_under(text:str,heading:str)->list[list[str]]:
  m=re.search(r"^#+\s*"+re.escape(heading)+r"\s*$",text,re.M)
@@ -283,10 +290,13 @@ DASHBOARD=[
 def build(papers:list[Path]|None=None,order:list[str]|None=None)->Path:
  """Writes index.html into papers_root, every series/group folder and every paper folder; data files into papers_root/_SITE/."""
  home=external("papers_root"); data=home/"_SITE"; data.mkdir(parents=True,exist_ok=True)
- recs=[paper_record(p) for p in sorted(papers if papers is not None else all_papers(home),key=run_order)]
+ # The dashboard, collection pages and index.tsv always cover every paper; `papers` only picks which paper pages to rewrite.
+ recs=[paper_record(p) for p in sorted(all_papers(home),key=run_order)]
+ rewrite=None if papers is None else {Path(p).resolve() for p in papers}
  for r in recs: r["row"]["_order"]=r["meta"].get("order")
  order=order or []; problems={r["paper"]:validate(r) for r in recs}
- for rec in recs: (rec["paper"]/"index.html").write_text(paper_page(rec,order,problems[rec["paper"]],home),encoding="utf-8")
+ for rec in recs:
+  if rewrite is None or rec["paper"] in rewrite: (rec["paper"]/"index.html").write_text(paper_page(rec,order,problems[rec["paper"]],home),encoding="utf-8")
  groups={}
  for rec in recs:
   k=collection(rec)
