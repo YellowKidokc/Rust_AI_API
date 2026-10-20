@@ -121,6 +121,24 @@ forge clips review \\NAS\clips\Library --route default                          
   (merge/rename suggestions, misfiled clips, what stands out, likely junk) and changes nothing.
 - `station\CLIPS SETUP.bat` sets the two folders, shows a dry run, and registers both as Windows scheduled tasks.
 
+## The workbench page: `ui/workbench.html`
+
+One HTML file that runs papers through API stations, driven entirely by an **API pack** (JSON you can export, edit, and
+import into another copy of the page). Open it straight from disk with `forge serve` running.
+
+- **Pages** (Intake, CKG, Theology, YouTube, Academia…) hold up to 20 station cards. `+ Station` and `Duplicate` make the next
+  one from the same pattern. Each page can set its own route; each station can override it.
+- **Stations** are a prompt template plus a **stage** and the **kinds** of paper they apply to (`paper`, `theology`, `ckg`,
+  `youtube`, or `*`). Templates use `{{document}} {{title}} {{kind}} {{related}} {{prior.ID}}`; anything else is flagged.
+- **Pipeline**: each paper runs its stages in order. Stations inside a stage run side by side (shared "at once" limit), and
+  the next stage waits. A station that reads `{{prior.X}}` is **blocked** if X failed, never run on a missing input.
+- **Papers**: drop files or pick a folder. Kind comes from `kind:` front matter (or is guessed); `related:` front matter
+  feeds `{{related}}`. Originals are never changed; each is fingerprinted with SHA-256.
+- **Thread**: every station run with time, stage, route, model, cost, ms and status. Unchanged work is skipped; repeats
+  that reach forge come back `CACHED` at $0.
+- **Save output folder** (Edge/Chrome) writes one folder per paper: `00 ORIGINAL.md`, `NN <station>.md` per result,
+  `THREAD.md`, `manifest.json` (hashes, models, costs). Other browsers download one bundle file per paper.
+
 ## HTTP gateway: `forge serve` (127.0.0.1:8790)
 
 | endpoint | for |
