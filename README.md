@@ -105,6 +105,8 @@ is ignored during a run; type `stop` to let in-flight documents finish and exit.
 
 ## Clipboard librarian
 
+The ClipSync React front end now lives in its own repo: [YellowKidokc/clipsync](https://github.com/YellowKidokc/clipsync). The librarian below stays here in forge.
+
 Point it at the folder your clipboard app drops clips into (one `.txt`/`.md` per clip, local or on the NAS):
 
 ```
@@ -212,7 +214,6 @@ crates/forge-core   library: config, provider, router, limiter, store, template,
 crates/forge        binary: main.rs (CLI), server.rs (HTTP), mcp.rs (MCP)
 crates/semtag-core  note-side tagging: tag block, inline labels, TSNS, fold, CSV, Mermaid (no network)
 crates/semtag-cli   offline semtag commands (apply, show-tags, fold, strip, ...)
-clipsync-cloudflare-app/   the React clipboard / research front end (Cloudflare Pages)
 config/             default providers.json, settings.json (compiled in as fallbacks)
 templates/          default job templates (compiled in as fallbacks)
 station/            .bat launchers and station layout
