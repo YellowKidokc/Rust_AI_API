@@ -105,7 +105,7 @@ is ignored during a run; type `stop` to let in-flight documents finish and exit.
 
 ## Clipboard librarian
 
-The ClipSync React front end now lives in its own repo: [YellowKidokc/clipsync](https://github.com/YellowKidokc/clipsync). The librarian below stays here in forge.
+The ClipSync React front end now lives in its own repo: [YellowKidokc/Rust_Clipsync](https://github.com/YellowKidokc/Rust_Clipsync). The librarian below stays here in forge.
 
 Point it at the folder your clipboard app drops clips into (one `.txt`/`.md` per clip, local or on the NAS):
 
