@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pipeline · API Workspace</title>
+<style>
+:root{color-scheme:dark;--bg:#050505;--panel:#0a0a0a;--surface:#111;--line:#292929;--text:#e8e6e1;--muted:#aaa7a0;--gold:#d4af37;--green:#4caf50;--red:#cf4444;--blue:#5b8def}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,sans-serif}button,input,select,textarea{font:inherit}button{cursor:pointer}button,input,select,textarea{border:1px solid #3d3a32;background:#101010;color:var(--text);border-radius:5px;padding:9px 12px}button:hover{border-color:var(--gold);color:#e6cc79}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--gold);outline-offset:3px}button.active{background:#191609;color:var(--gold);border-color:#5c4b20}button.primary{background:var(--gold);color:#090909;border-color:var(--gold);font-weight:700}button:disabled{opacity:.45;cursor:default}header{min-height:70px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:30px;padding:0 28px;background:var(--panel)}.brand{letter-spacing:.3em;color:var(--gold);font-size:17px}.topnav{display:flex;align-self:stretch;gap:18px}.topnav button{border:0;border-bottom:2px solid transparent;border-radius:0;background:transparent;padding:18px 12px}.topnav button.active{color:var(--gold);border-bottom-color:var(--gold)}.prototype{margin-left:auto;color:var(--muted);font-size:12px}
+main{padding:28px 32px 0;max-width:1600px;width:100%;margin:auto;align-self:start}h1{font-size:30px;line-height:1.2;margin:0}h2{font-size:15px;margin:0 0 4px}p{margin:5px 0 18px;color:var(--muted)}.heading{display:flex;align-items:center;gap:16px;margin-bottom:7px}.small{font-size:12px;color:var(--muted)}.tabs{display:flex;gap:22px;border-bottom:1px solid var(--line);margin:12px 0 22px}.panel{border:1px solid var(--line);background:var(--panel);border-radius:7px;padding:20px;margin-bottom:20px}.panel-head{display:flex;justify-content:space-between;gap:15px;align-items:start;margin-bottom:18px}.panel-head p{margin:3px 0 0;font-size:12px}.fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}.fields label,.editor label{display:block;font-size:12px}.fields select,.fields input{display:block;width:100%;margin-top:6px}.checks{display:grid;gap:15px;margin:20px 0 28px}.checks label{display:flex;align-items:center;gap:12px}.checks input{accent-color:var(--gold);width:17px;height:17px}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}.status{border-top:1px solid var(--line);padding:15px 0;color:var(--muted);font-size:12px;margin-top:12px}.hidden,[hidden]{display:none!important}.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#201b0b;border:1px solid var(--gold);padding:12px 20px;border-radius:6px;max-width:90vw;z-index:5}
+
+/* Dashboard */
+.stage-diagram{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0 24px;padding:16px;border:1px solid var(--line);background:var(--panel);border-radius:7px}.stage-diagram button{background:transparent;border-color:transparent;padding:6px 10px;border-radius:4px;color:var(--muted);font-size:12px}.stage-diagram button:hover{color:var(--gold)}.stage-diagram button.active{background:#191609;color:var(--gold)}.stage-diagram .arrow{color:var(--muted);font-size:11px}.dashboard-grid{display:grid;grid-template-columns:260px repeat(var(--stage-count),minmax(110px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:7px;overflow:auto}.dashboard-grid>div{background:var(--panel);padding:10px 12px;font-size:12px;min-width:0}.dashboard-grid .grid-head{font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-size:11px}.dashboard-grid .paper-cell{font-weight:500;color:var(--text);display:flex;align-items:center;gap:8px}.dashboard-grid .paper-cell button{font-size:11px;padding:4px 8px}.dashboard-grid .cell{position:relative;min-height:44px;display:flex;align-items:center;justify-content:center}.dashboard-grid .badge{font-size:11px;padding:4px 8px;border-radius:12px;white-space:nowrap}.badge.done{background:#1a3a22;color:#9ed0ac;border:1px solid #365b40}.badge.running{background:#3d3210;color:var(--gold);border:1px solid #5c4b20;animation:pulse 1.4s infinite}@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}.badge.queued{background:#1a1a1a;color:var(--muted);border:1px solid var(--line)}.badge.failed{background:#3a1515;color:#e08a8a;border:1px solid #7a2b2b}.badge.review{background:#1a253a;color:#8bb4e8;border:1px solid #3a517a}.badge.notrun{background:transparent;color:var(--muted);border:1px dashed var(--line)}.dashboard-filters{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap}.dashboard-filters button{background:transparent;border-color:var(--line);font-size:12px}.dashboard-filters button.active{background:#191609;border-color:#5c4b20;color:var(--gold)}
+
+/* Quick Run */
+.run-stages{list-style:none;display:flex;gap:8px;padding:0;flex-wrap:wrap;margin:0 0 20px;counter-reset:stage}.run-stages li{counter-increment:stage;border:1px solid var(--line);border-radius:5px;padding:8px 10px;color:var(--muted);font-size:12px}.run-stages li::before{content:counter(stage) " · "}.run-stages li.current{border-color:var(--gold);color:var(--gold);background:#191609}.run-stages li.done{color:#9ed0ac;border-color:#365b40}#verbose-log{background:#070907;border:1px solid #26382b;color:#b8d2bf;padding:20px;min-height:300px;max-height:460px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.85 ui-monospace,Consolas,monospace;margin:12px 0}
+
+/* Workbench */
+.work{display:grid;grid-template-columns:minmax(240px,.75fr) minmax(0,1.4fr);gap:20px}.folders{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-bottom:20px}.folder{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.folder label{font-size:12px}.folder input{min-width:100px;flex:1;width:100%}.tablewrap{overflow:auto}table{width:100%;border-collapse:collapse;text-align:left;white-space:nowrap}th,td{padding:12px 10px;border-bottom:1px solid var(--line);font-size:13px}th{color:var(--muted);font-weight:500}.saved{color:#a6c8a3}.running{color:var(--gold)}.progresshead{display:flex;justify-content:space-between;gap:15px;align-items:center;margin-bottom:18px}.meter{height:6px;background:#262626;border-radius:8px;flex:1;max-width:190px;overflow:hidden}.meter span{display:block;background:var(--gold);height:100%;width:3%}.editors{display:grid;grid-template-columns:1fr 1fr;gap:20px}.editor textarea{width:100%;height:340px;display:block;margin-top:8px;resize:vertical;font:13px/1.8 ui-monospace,monospace}.workflowgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.workflowcard button{margin-top:12px}.folder-items{list-style:none;padding:0}.folder-items li{padding:13px;border-bottom:1px solid var(--line)}.reviewrow{padding:18px 0;border-bottom:1px solid var(--line)}.reviewrow h3{margin:0 0 5px;font-size:15px}.sequence-actions{display:flex;gap:6px}.sequence-actions button{padding:5px 9px}dialog{background:#0a0a0a;color:var(--text);border:1px solid #5c4b20;border-radius:8px;max-width:720px;width:90%;padding:28px}dialog::backdrop{background:#000b}.record-layout{display:grid;grid-template-columns:270px minmax(0,1fr);gap:20px}.record-parts{max-height:760px;overflow:auto;display:grid;gap:5px}.record-parts button{text-align:left;font-size:12px}.record-editor{display:block;width:100%;height:240px;margin:8px 0 16px;font:12px/1.7 ui-monospace,monospace;resize:vertical}.run-green{background:#258347;border-color:#3aab62;color:white;font-size:20px;font-weight:750;min-width:180px;padding:14px 28px}.stop-red{background:#9d3030;border-color:#d04e4e;color:white;font-size:20px;font-weight:700;min-width:130px;padding:14px 24px}
+
+@media(min-width:1600px){main{padding:40px 48px 0}}@media(max-width:1000px){main{padding:24px 20px 0}.work{grid-template-columns:1fr}.fields{grid-template-columns:repeat(2,1fr)}.prototype{max-width:120px}.folders{grid-template-columns:1fr}.dashboard-grid{grid-template-columns:200px repeat(var(--stage-count),minmax(90px,1fr))}}@media(max-width:640px){header{padding:12px 16px;gap:8px;flex-wrap:wrap}.brand{font-size:15px}.prototype{max-width:none;font-size:10px}.topnav{order:3;width:100%;gap:10px}.topnav button{padding:10px}main{padding:22px 16px 0}h1{font-size:26px}.tabs{gap:10px}.fields,.editors,.workflowgrid{grid-template-columns:1fr}.panel{padding:16px}.progresshead{flex-wrap:wrap}.folder{gap:8px}.folder label{flex-basis:100%}.panel-head{flex-wrap:wrap}.editor textarea{height:250px}.work{display:flex;flex-direction:column}.dashboard-grid{grid-template-columns:160px repeat(var(--stage-count),minmax(80px,1fr))}.stage-diagram{gap:4px}.stage-diagram button{padding:5px 7px;font-size:11px}.stage-diagram .arrow{display:none}}.record-layout{grid-template-columns:1fr}.record-parts{max-height:220px}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">PIPELINE</div>
+  <nav class="topnav" aria-label="Main navigation">
+    <button class="active" data-page="dashboard">Dashboard</button>
+    <button data-page="quickrun">Quick Run</button>
+    <button data-page="workbench">Workbench</button>
+  </nav>
+  <span class="prototype">Flow prototype · no APIs connected</span>
+</header>
+
+<main>
+<!-- ============================================================= DASHBOARD -->
+<section id="dashboard-page">
+  <div class="heading"><h1>Pipeline Dashboard</h1></div>
+  <p>One view of every paper and where it stands. Click a stage to filter, or select papers and run the next step.</p>
+
+  <div class="panel">
+    <div class="panel-head"><div><h2>Pipeline stages</h2><p>Click a stage to filter the grid. A paper advances one stage at a time.</p></div></div>
+    <div class="stage-diagram" id="stage-diagram"></div>
+    <p class="small">Dashboard state is read from <code>&lt;uid&gt;.&lt;pass&gt;.md</code> outputs. Real accuracy depends on <code>source_uid</code> being stamped on every output.</p>
+  </div>
+
+  <div class="dashboard-filters">
+    <button id="filter-all" class="active">All papers</button>
+    <button id="filter-running">Running</button>
+    <button id="filter-failed">Failed</button>
+    <button id="filter-review">Needs review</button>
+  </div>
+
+  <div class="panel" style="padding:0;overflow:hidden">
+    <div class="dashboard-grid" id="dashboard-grid" style="--stage-count:10"></div>
+  </div>
+</section>
+
+<!-- ============================================================= QUICK RUN -->
+<section id="quickrun-page" hidden>
+  <div class="heading"><h1>Quick Run</h1></div>
+  <p>Run the next pass for one or more papers. Selections come from the dashboard.</p>
+
+  <div class="panel">
+    <div class="panel-head"><div><h2>Run settings</h2><p>Which papers, which passes, and in what order.</p></div><button id="back-to-dashboard">Back to dashboard</button></div>
+    <div class="fields">
+      <label>Papers<input id="qr-papers" value="Note 01.md, Note 02.md, Note 03.md" readonly></label>
+      <label>Next pass<select id="qr-pass"><option>CKG</option><option>C P E L</option><option>YouTube</option><option>Academia</option><option>Atoms</option><option>Arguments</option><option>API Deep</option></select></label>
+      <label>Run mode<select id="qr-mode"><option>All selected papers, then next pass</option><option>One pass across all papers, then next</option><option>Independent calls in parallel</option></select></label>
+      <label>Model<select id="qr-model"><option>DeepSeek Chat</option><option>DeepSeek Reasoner</option></select></label>
+      <label>Parallel limit<input id="qr-concurrency" type="number" min="1" max="30" value="4"></label>
+      <label>Existing results<select id="qr-existing"><option>Skip completed</option><option>Run selected again</option></select></label>
+    </div>
+    <div class="actions" style="margin-top:24px">
+      <button class="run-green" id="qr-start">▶ Run</button>
+      <button class="stop-red" id="qr-stop">■ Stop</button>
+      <button id="qr-pause">Ⅱ Pause queue</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><div><h2>Live activity</h2><p>Sample playback · no real API calls</p></div><label><input type="checkbox" id="qr-follow" checked> Follow latest</label></div>
+    <ol id="qr-stages" class="run-stages"><li>Check inputs</li><li>Prepare prompts</li><li>Call model</li><li>Check answers</li><li>Save results</li><li>Assemble HTML</li></ol>
+    <pre id="verbose-log" tabindex="0" aria-label="Sample verbose activity log">Ready for a sample run. Press Run to see the stages.</pre>
+  </div>
+</section>
+
+<!-- ============================================================= WORKBENCH -->
+<section id="workbench-page" hidden>
+  <div class="heading"><h1 id="workbench-title">Workbench</h1><button id="wb-back">← Back to dashboard</button></div>
+  <p>Configure API groups, build workflows, design assemblies, and review HTML.</p>
+
+  <nav class="tabs" aria-label="Workbench views"><button class="active" data-tab="calls">API Groups</button><button data-tab="workflows">Workflows</button><button data-tab="assemblies">HTML Assemblies</button><button data-tab="reviews">HTML Review <span id="review-count">2</span></button><button data-tab="settings">Settings</button></nav>
+
+  <section id="calls-tab">
+    <div class="folders"><div class="folder"><label for="input-folder">Input folder</label><input id="input-folder" value="/Papers/Selected" aria-describedby="folderhint"></div><div class="folder"><label for="output-folder">Fixed output folder</label><input id="output-folder" value="/CKG/OUTBOX"></div></div>
+    <p id="folderhint" class="small">Each group has a fixed output folder. Save every completed result there immediately, one at a time. Paths here are examples.</p>
+
+    <div class="work"><section class="panel"><div class="panel-head"><h2>API groups</h2></div><div class="checks" id="group-list"></div></section><section class="panel progresspanel"><div class="progresshead"><h2>Group progress</h2><div class="meter" aria-hidden="true"><span></span></div><span class="small">1 of 36 saved</span></div><div class="tablewrap"><table><thead><tr><th>Note</th><th>Call</th><th>State</th></tr></thead><tbody id="progress-body"></tbody></table></div><div class="actions"><button class="primary" id="run-demo">▶ Run this group</button><button id="pause-demo">Ⅱ Pause queue</button><button id="stop-demo">■ Stop run</button></div><p class="small" style="margin-top:14px">Sample progress — no active API calls or file operations.</p><div id="demo-state" class="small" role="status">Previewing an example run.</div></section></div>
+  </section>
+
+  <section id="workflows-tab" hidden><div class="panel"><div class="fields"><label>Workflow name<input id="sequence-name" value="Prepare HTML publication"></label><label>Source folder<input id="sequence-source" value="D:/PipelineRuntime/Papers"></label><label>HTML review behavior<select id="review-mode"><option>Continue processing while I review</option><option>Wait for approval before the next step</option></select></label></div></div><div class="panel"><div class="panel-head"><div><h2>Which steps, in what order?</h2><p>Use the arrows to arrange the sequence. Adding an API group also adds its HTML assembly.</p></div><button id="save-sequence">Save workflow</button></div><div class="tablewrap"><table><thead><tr><th>Order</th><th>Step</th><th>Type</th><th>Arrange</th></tr></thead><tbody id="sequence-rows"></tbody></table></div><div class="actions"><select id="add-step" aria-label="Step to add"></select><button id="append-step">Add step</button></div></div><div class="panel"><h2>Run this workflow</h2><p id="sequence-summary"></p><div class="actions"><button class="primary" id="run-sequence">▶ Run workflow</button><button id="stop-sequence">■ Stop workflow</button></div><p id="sequence-status" class="small" style="margin-top:16px">Example only.</p></div></section>
+
+  <section id="assemblies-tab" hidden><h2>HTML Assemblies</h2><p>Each API group is followed by its own HTML assembly station. Assemblies read completed JSON records and save one HTML result per note.</p><div class="panel"><div class="tablewrap"><table><thead><tr><th>After API group</th><th>Assembly station</th><th>Layout</th></tr></thead><tbody id="assembly-table"></tbody></table></div></div></section>
+
+  <section id="reviews-tab" hidden><h2>HTML Review</h2><p>HTML assemblies appear here as they finish. Open, inspect, pass or fail.</p><div class="panel"><div id="review-list"></div></div></section>
+
+  <section id="settings-tab" hidden><h2>Settings</h2><p>Application defaults. Each API group can override these.</p><div class="panel"><div class="fields"><label>Default model<select><option>DeepSeek Chat</option><option>DeepSeek Reasoner</option></select></label><label>Default parallel limit<input type="number" min="1" max="30" value="4"></label></div></div><div class="panel"><h2>About this mockup</h2><p>Standalone HTML. No dependencies, credentials, folder access, network requests, or background jobs.</p></div></section>
+</section>
+</main>
+
+<div class="toast" role="status" hidden></div>
+<dialog id="html-preview"><h2 id="preview-title"></h2><p class="small">Sample assembled HTML</p><p>This represents the rendered document you would inspect.</p><button id="close-preview">Close preview</button></dialog>
+
+<script>
+'use strict';
+const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
+
+const STAGES=[
+  {id:'source',name:'Source',type:'source'},
+  {id:'ckg',name:'CKG',type:'pass'},{id:'ckg-html',name:'CKG HTML',type:'assembly'},
+  {id:'cpel',name:'C P E L',type:'pass'},{id:'cpel-html',name:'C P E L HTML',type:'assembly'},
+  {id:'youtube',name:'YouTube',type:'pass'},{id:'youtube-html',name:'YouTube HTML',type:'assembly'},
+  {id:'academia',name:'Academia',type:'pass'},{id:'academia-html',name:'Academia HTML',type:'assembly'},
+  {id:'atoms',name:'Atoms',type:'pass'},{id:'atoms-html',name:'Atoms HTML',type:'assembly'},
+  {id:'arguments',name:'Arguments',type:'pass'},{id:'arguments-html',name:'Arguments HTML',type:'assembly'},
+  {id:'apideep',name:'API Deep',type:'pass'},{id:'apideep-html',name:'API Deep HTML',type:'assembly'},
+  {id:'review',name:'Review',type:'review'},{id:'publish',name:'Publish',type:'publish'}
+];
+const PASS_STAGES=STAGES.filter(s=>s.type==='pass').map(s=>s.id);
+
+const papers=[
+  {uid:'p-001',title:'Resurrection Evidence Note',states:{source:'done',ckg:'done','ckg-html':'done',cpel:'done','cpel-html':'running',youtube:'notrun','youtube-html':'notrun',academia:'notrun','academia-html':'notrun',atoms:'notrun','atoms-html':'notrun',arguments:'notrun','arguments-html':'notrun',apideep:'notrun','apideep-html':'notrun',review:'notrun',publish:'notrun'}},
+  {uid:'p-002',title:'Quantum Field Note',states:{source:'done',ckg:'done','ckg-html':'done',cpel:'done','cpel-html':'done',youtube:'done','youtube-html':'failed',academia:'notrun','academia-html':'notrun',atoms:'notrun','atoms-html':'notrun',arguments:'notrun','arguments-html':'notrun',apideep:'notrun','apideep-html':'notrun',review:'notrun',publish:'notrun'}},
+  {uid:'p-003',title:'Moral Realism Draft',states:{source:'done',ckg:'done','ckg-html':'done',cpel:'done','cpel-html':'done',youtube:'done','youtube-html':'done',academia:'done','academia-html':'review',atoms:'notrun','atoms-html':'notrun',arguments:'notrun','arguments-html':'notrun',apideep:'notrun','apideep-html':'notrun',review:'notrun',publish:'notrun'}},
+  {uid:'p-004',title:'Lean4 Bridge Note',states:{source:'done',ckg:'queued','ckg-html':'notrun',cpel:'notrun','cpel-html':'notrun',youtube:'notrun','youtube-html':'notrun',academia:'notrun','academia-html':'notrun',atoms:'notrun','atoms-html':'notrun',arguments:'notrun','arguments-html':'notrun',apideep:'notrun','apideep-html':'notrun',review:'notrun',publish:'notrun'}},
+  {uid:'p-005',title:'Coherence Score Test',states:{source:'done',ckg:'done','ckg-html':'done',cpel:'done','cpel-html':'done',youtube:'done','youtube-html':'done',academia:'done','academia-html':'done',atoms:'done','atoms-html':'done',arguments:'done','arguments-html':'done',apideep:'done','apideep-html':'done',review:'done',publish:'done'}}
+];
+
+const groups=[['01_CKG','CKG'],['02_C_P_E_L','C P E L'],['02_YOUTUBE','YouTube'],['04_ACADEMIA','Academia'],['06_ATOMS','Atoms'],['07_ARGUMENTS','Arguments'],['08_API_DEEP','API Deep']];
+const assemblies=[{id:'01A_CKG_HTML',group:'01_CKG',name:'CKG HTML assembly'},{id:'02A_C_P_E_L_HTML',group:'02_C_P_E_L',name:'C P E L HTML assembly'},{id:'02A_YOUTUBE_HTML',group:'02_YOUTUBE',name:'YouTube HTML assembly'},{id:'04A_ACADEMIA_HTML',group:'04_ACADEMIA',name:'Academia HTML assembly'},{id:'06A_ATOMS_HTML',group:'06_ATOMS',name:'Atoms HTML assembly'},{id:'07A_ARGUMENTS_HTML',group:'07_ARGUMENTS',name:'Arguments HTML assembly'},{id:'08A_API_DEEP_HTML',group:'08_API_DEEP',name:'API Deep HTML assembly'}];
+let sequence=["01_CKG","01A_CKG_HTML","02_C_P_E_L","02A_C_P_E_L_HTML","02_YOUTUBE","02A_YOUTUBE_HTML","04_ACADEMIA","04A_ACADEMIA_HTML","06_ATOMS","06A_ATOMS_HTML","07_ARGUMENTS","07A_ARGUMENTS_HTML","08_API_DEEP","08A_API_DEEP_HTML"];
+const reviews=[{title:'Note 01 · Academia HTML',step:'04A · Academia HTML assembly',status:'Awaiting review'},{title:'Note 02 · YouTube HTML',step:'02A · YouTube HTML assembly',status:'Awaiting review'}];
+
+function toast(t){$('.toast').textContent=t;$('.toast').hidden=false;clearTimeout(window.toastTimer);window.toastTimer=setTimeout(()=>$('.toast').hidden=true,3500)}
+function page(name){['dashboard','quickrun','workbench'].forEach(p=>{$('#'+p+'-page').hidden=p!==name});$$('[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name))}
+function wbTab(name){['calls','workflows','assemblies','reviews','settings'].forEach(t=>{$('#'+t+'-tab').hidden=t!==name});$$('[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===name))}
+
+function renderStageDiagram(){
+  const root=$('#stage-diagram');root.replaceChildren();
+  STAGES.forEach((s,i)=>{
+    const b=document.createElement('button');b.textContent=s.name;b.dataset.stage=s.id;b.onclick=()=>filterDashboard(s.id);root.append(b);
+    if(i<STAGES.length-1){const a=document.createElement('span');a.className='arrow';a.textContent='→';root.append(a)}
+  });
+}
+
+let activeStage=null;
+function filterDashboard(stage){
+  activeStage=activeStage===stage?null:stage;
+  $$('#stage-diagram button').forEach(b=>b.classList.toggle('active',activeStage&&b.dataset.stage===activeStage));
+  renderDashboardGrid();
+}
+
+function stateBadge(state){
+  const map={done:'done',running:'running',queued:'queued',failed:'failed',review:'review',notrun:'notrun'};
+  const labels={done:'Done',running:'Running',queued:'Queued',failed:'Failed',review:'Needs review',notrun:'Not run'};
+  const el=document.createElement('span');el.className='badge '+map[state];el.textContent=labels[state];return el;
+}
+
+function nextPendingStage(states){
+  for(const s of STAGES)if(s.type!=='source'&&states[s.id]==='notrun')return s.id;
+  return 'publish';
+}
+
+function renderDashboardGrid(){
+  const root=$('#dashboard-grid');root.replaceChildren();root.style.setProperty('--stage-count',STAGES.length);
+  root.appendChild(Object.assign(document.createElement('div'),{className:'grid-head',textContent:'Paper'}));
+  STAGES.forEach(s=>{const d=document.createElement('div');d.className='grid-head';d.textContent=s.name;root.append(d)});
+  papers.forEach(p=>{
+    if(activeStage&&p.states[activeStage]==='notrun')return;
+    const cell=document.createElement('div');cell.className='paper-cell';
+    const title=document.createElement('span');title.textContent=p.title;title.style='white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+    const run=document.createElement('button');run.textContent='▶';run.title='Run next step';run.onclick=()=>openQuickRun([p.title]);
+    const open=document.createElement('button');open.textContent='⚙';open.title='Open in workbench';open.onclick=()=>page('workbench');
+    cell.append(title,run,open);root.append(cell);
+    STAGES.forEach(s=>{const d=document.createElement('div');d.className='cell';d.appendChild(stateBadge(p.states[s.id]));d.onclick=()=>filterDashboard(s.id);root.append(d)});
+  });
+}
+
+function openQuickRun(paperTitles){
+  $('#qr-papers').value=paperTitles.join(', ');
+  page('quickrun');
+}
+
+function renderFilters(){
+  $$('.dashboard-filters button').forEach(b=>b.onclick=()=>{
+    $$('.dashboard-filters button').forEach(x=>x.classList.remove('active'));b.classList.add('active');
+    // In a real app this would filter the underlying data; here it just toasts.
+    toast(b.textContent+' filter applied (sample data)');
+  });
+}
+
+function renderWorkbench(){
+  // API groups list
+  const gl=$('#group-list');gl.replaceChildren();
+  groups.forEach(([id,name])=>{
+    const label=document.createElement('label');const input=document.createElement('input');input.type='checkbox';input.checked=true;input.disabled=true;label.append(input,document.createTextNode(name+' ('+id+')'));gl.append(label);
+  });
+  // Progress table sample
+  const pb=$('#progress-body');pb.replaceChildren();
+  [['Note 01','CKG','Saved'],['Note 01','C P E L','Running'],['Note 02','YouTube','Queued']].forEach(([note,call,status])=>{
+    const tr=document.createElement('tr');[note,call,status].forEach((text,j)=>{const td=document.createElement('td');td.textContent=text;if(j===2)td.className=status.toLowerCase();tr.append(td)});pb.append(tr);
+  });
+  // Workflow builder
+  const add=$('#add-step');add.replaceChildren();groups.forEach(([id,name])=>{const o=document.createElement('option');o.value=id;o.textContent=name;add.append(o)});
+  renderSequence();
+  // Assemblies table
+  const at=$('#assembly-table');at.replaceChildren();assemblies.forEach(a=>{const tr=document.createElement('tr');[a.group,a.name,'shared/custom'].forEach(t=>{const td=document.createElement('td');td.textContent=t;tr.append(td)});at.append(tr)});
+  // Reviews
+  renderReviews();
+}
+
+function renderSequence(){
+  const root=$('#sequence-rows');root.replaceChildren();
+  sequence.forEach((id,i)=>{
+    const tr=document.createElement('tr');
+    const isGroup=groups.some(g=>g[0]===id);
+    [String(i+1),isGroup?id+' · '+groups.find(g=>g[0]===id)[1]:assemblies.find(a=>a.id===id)?.name||id,isGroup?'API group':'HTML assembly'].forEach(t=>{const td=document.createElement('td');td.textContent=t;tr.append(td)});
+    const td=document.createElement('td');td.className='sequence-actions';
+    [['↑',-1],['↓',1],['Remove',0]].forEach(([label,d])=>{const b=document.createElement('button');b.textContent=label;b.disabled=(d===-1&&i===0)||(d===1&&i===sequence.length-1);b.onclick=()=>{if(!d)sequence.splice(i,1);else [sequence[i],sequence[i+d]]=[sequence[i+d],sequence[i]];renderSequence()};td.append(b)});
+    tr.append(td);root.append(tr);
+  });
+  $('#sequence-summary').textContent=`${sequence.filter(id=>groups.some(g=>g[0]===id)).length} API groups · ${sequence.filter(id=>assemblies.some(a=>a.id===id)).length} HTML assemblies.`;
+}
+
+function renderReviews(){
+  const rl=$('#review-list');rl.replaceChildren();
+  reviews.forEach(r=>{
+    const row=document.createElement('div');row.className='reviewrow';
+    const h=document.createElement('h3');h.textContent=r.title;
+    const p=document.createElement('p');p.textContent=r.step+' · '+r.status;
+    row.append(h,p);
+    const actions=document.createElement('div');actions.className='actions';
+    ['Open HTML','Pass','Fail'].forEach(action=>{const b=document.createElement('button');b.textContent=action;b.onclick=()=>{if(action==='Open HTML'){$('#preview-title').textContent=r.title;$('#html-preview').showModal()}else{r.status=action==='Pass'?'Passed':'Failed — needs correction';renderReviews();toast('Review decision recorded.')}};actions.append(b)});
+    row.append(actions);rl.append(row);
+  });
+  $('#review-count').textContent=reviews.filter(r=>r.status==='Awaiting review').length;
+}
+
+// Event wiring
+$$('[data-page]').forEach(b=>b.onclick=()=>{if(b.dataset.page==='quickrun')openQuickRun(papers.filter(p=>p.states[nextPendingStage(p.states)]!=='notrun'||p.states[nextPendingStage(p.states)]==='notrun').slice(0,3).map(p=>p.title));else page(b.dataset.page)});
+$$('[data-tab]').forEach(b=>b.onclick=()=>wbTab(b.dataset.tab));
+$('#wb-back').onclick=()=>page('dashboard');
+$('#back-to-dashboard').onclick=()=>page('dashboard');
+$('#filter-all').onclick=()=>filterDashboard(null);
+
+$('#qr-start').onclick=()=>{
+  $('#verbose-log').textContent='Starting sample run for '+$('#qr-papers').value+'\n[check] inputs present\n[prepare] prompt for '+$('#qr-pass').value+'\n[call] model (sample)\n[save] '+$('#qr-pass').value+' output\n[assemble] HTML queued for review\nDone.';
+  toast('Sample run completed.');
+};
+$('#qr-stop').onclick=()=>{$('#verbose-log').textContent+='\nStopped by user.';toast('Run stopped.')};
+$('#qr-pause').onclick=()=>toast('Queue paused (sample).');
+
+$('#run-demo').onclick=()=>{$('#demo-state').textContent='Example group run selected. Each completed answer would save immediately.';toast('Example group run selected.')};
+$('#pause-demo').onclick=()=>{$('#demo-state').textContent='Example queue paused.';toast('Queue paused.')};
+$('#stop-demo').onclick=()=>{$('#demo-state').textContent='Example group stopped.';toast('Run stopped.')};
+
+$('#append-step').onclick=()=>{const id=$('#add-step').value;sequence.push(id);const paired=assemblies.find(a=>a.group===id);if(paired)sequence.push(paired.id);renderSequence()};
+$('#save-sequence').onclick=()=>toast('Workflow saved (sample).');
+$('#run-sequence').onclick=()=>{$('#sequence-status').textContent='Sample workflow started.';toast('Workflow started.')};
+$('#stop-sequence').onclick=()=>{$('#sequence-status').textContent='Sample workflow stopped.';toast('Workflow stopped.')};
+$('#close-preview').onclick=()=>$('#html-preview').close();
+
+// Init
+renderStageDiagram();
+renderDashboardGrid();
+renderFilters();
+renderWorkbench();
+page('dashboard');
+</script>
+</body>
+</html>
