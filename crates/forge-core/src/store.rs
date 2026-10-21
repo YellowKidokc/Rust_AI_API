@@ -151,7 +151,101 @@ CREATE TABLE IF NOT EXISTS audits (
     at   TEXT NOT NULL,
     body TEXT NOT NULL
 );
+
+-- Latest state per (document, job). `documents` keeps only the last job, which made multi-stage runs
+-- re-run (and re-bill) earlier stages; skip-unchanged reads this table instead.
+CREATE TABLE IF NOT EXISTS doc_jobs (
+    doc_id      TEXT NOT NULL,
+    job         TEXT NOT NULL,
+    source_hash TEXT NOT NULL,
+    status      TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (doc_id, job)
+);
+
+-- Permanent paper ids. A uid survives every edit; content hashes are its versions.
+CREATE TABLE IF NOT EXISTS papers (
+    uid         TEXT PRIMARY KEY,
+    path        TEXT NOT NULL,
+    current_sha TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS papers_path ON papers(path);
+CREATE TABLE IF NOT EXISTS paper_versions (
+    uid     TEXT NOT NULL,
+    sha256  TEXT NOT NULL,
+    path    TEXT NOT NULL,
+    seen_at TEXT NOT NULL,
+    PRIMARY KEY (uid, sha256)
+);
+CREATE INDEX IF NOT EXISTS paper_versions_sha ON paper_versions(sha256);
+-- Every uid forge had to mint or reattach without a frontmatter id. Reviewed by a human, never guessed.
+CREATE TABLE IF NOT EXISTS uid_orphans (
+    id     INTEGER PRIMARY KEY,
+    at     TEXT NOT NULL,
+    path   TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    uid    TEXT NOT NULL,
+    reason TEXT NOT NULL
+);
+
+-- Pipeline runs that survive a restart: mode, gate state, and a cursor into `paths`.
+CREATE TABLE IF NOT EXISTS runs (
+    id         TEXT PRIMARY KEY,
+    mode       TEXT NOT NULL,              -- all | first-then-approve | step
+    status     TEXT NOT NULL,              -- running | awaiting_approval | paused | done | failed | cancelled
+    spec       TEXT NOT NULL,              -- JSON: stages, outbox, route, redo, workers
+    paths      TEXT NOT NULL,              -- JSON array, in run order
+    cursor     INTEGER NOT NULL DEFAULT 0, -- index of the next paper to start
+    approved   INTEGER NOT NULL DEFAULT 0, -- first-then-approve: gate already passed
+    note       TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+-- One row per paper x stage job in a run: the dashboard grid.
+CREATE TABLE IF NOT EXISTS run_cells (
+    run_id     TEXT NOT NULL,
+    uid        TEXT NOT NULL,
+    doc_id     TEXT NOT NULL,
+    path       TEXT NOT NULL,
+    stage      INTEGER NOT NULL,
+    job        TEXT NOT NULL,
+    status     TEXT NOT NULL,              -- pending | running | ok | failed | blocked | skipped | awaiting_approval
+    cost_usd   REAL NOT NULL DEFAULT 0,
+    tokens     INTEGER NOT NULL DEFAULT 0,
+    output_ref TEXT,
+    error      TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (run_id, uid, job)
+);
 "#;
+
+/// Columns added after the first release. `ALTER TABLE ADD COLUMN` only if missing, so old ledgers open.
+const MIGRATIONS: &[(&str, &str, &str)] = &[
+    ("calls", "uid", "TEXT"),
+    ("calls", "focus_sha256", "TEXT"),
+    ("documents", "uid", "TEXT"),
+    ("derivatives", "uid", "TEXT"),
+];
+
+fn migrate(conn: &Connection) -> Result<()> {
+    for (table, col, ty) in MIGRATIONS {
+        let mut st = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+        let have = st
+            .query_map([], |r| r.get::<_, String>(1))?
+            .flatten()
+            .any(|c| c == *col);
+        if !have {
+            conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {col} {ty}"))?;
+        }
+    }
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS calls_uid ON calls(uid);
+         CREATE INDEX IF NOT EXISTS derivatives_uid ON derivatives(uid);",
+    )?;
+    Ok(())
+}
 
 pub fn now() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
@@ -168,6 +262,8 @@ pub struct Store {
 pub struct CallRecord {
     pub task: String,
     pub doc_id: Option<String>,
+    pub uid: Option<String>,
+    pub focus_sha256: Option<String>,
     pub route: Option<String>,
     pub provider: String,
     pub model: String,
@@ -231,6 +327,7 @@ impl Store {
         let conn = Connection::open(path)?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.execute_batch(SCHEMA)?;
+        migrate(&conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             path: path.display().to_string(),
@@ -240,6 +337,7 @@ impl Store {
     pub fn open_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch(SCHEMA)?;
+        migrate(&conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             path: ":memory:".into(),
@@ -257,8 +355,8 @@ impl Store {
         db.execute(
             "INSERT INTO calls (task, doc_id, route, provider, model, tier, rung, attempt, status, error_kind, error,
                 prompt_tokens, completion_tokens, cost_usd, latency_ms, finish_reason, prompt_sha256, prompt_text,
-                output_text, started_at, finished_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)",
+                output_text, started_at, finished_at, uid, focus_sha256)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)",
             params![
                 c.task,
                 c.doc_id,
@@ -280,7 +378,9 @@ impl Store {
                 c.prompt_text,
                 c.output_text,
                 c.started_at,
-                c.finished_at
+                c.finished_at,
+                c.uid,
+                c.focus_sha256
             ],
         )?;
         Ok(db.last_insert_rowid())
@@ -411,10 +511,29 @@ impl Store {
             params![doc_id, path, job, source_hash, status, last_call_id, last_output, t],
         )?;
         db.execute(
+            "INSERT INTO doc_jobs (doc_id, job, source_hash, status, updated_at) VALUES (?1,?2,?3,?4,?5)
+             ON CONFLICT(doc_id, job) DO UPDATE SET source_hash=excluded.source_hash, status=excluded.status,
+                updated_at=excluded.updated_at",
+            params![doc_id, job, source_hash, status, t],
+        )?;
+        db.execute(
             "INSERT INTO doc_events (doc_id, at, event, detail) VALUES (?1, ?2, ?3, ?4)",
             params![doc_id, t, status, job],
         )?;
         Ok(())
+    }
+
+    /// This exact source already went through this exact job successfully.
+    pub fn doc_job_done(&self, doc_id: &str, job: &str, source_hash: &str) -> Result<bool> {
+        Ok(self
+            .lock()
+            .query_row(
+                "SELECT 1 FROM doc_jobs WHERE doc_id = ?1 AND job = ?2 AND source_hash = ?3 AND status = 'DONE'",
+                params![doc_id, job, source_hash],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
     }
 
     pub fn doc_note(&self, doc_id: &str, note: &str) -> Result<()> {
@@ -588,6 +707,37 @@ impl Store {
             Ok(serde_json::json!({
                 "parent_sha256": r.get::<_, String>(0)?, "job": r.get::<_, String>(1)?, "output_path": r.get::<_, String>(2)?,
                 "output_sha256": r.get::<_, String>(3)?, "call_id": r.get::<_, Option<i64>>(4)?, "created_at": r.get::<_, String>(5)?,
+            }))
+        })?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Stamp a document's state row and its untagged lineage rows with the paper's permanent uid.
+    pub fn tag_uid(&self, doc_id: &str, uid: &str) -> Result<()> {
+        let db = self.lock();
+        db.execute(
+            "UPDATE documents SET uid = ?2 WHERE doc_id = ?1",
+            params![doc_id, uid],
+        )?;
+        db.execute(
+            "UPDATE derivatives SET uid = ?2 WHERE parent_doc_id = ?1 AND uid IS NULL",
+            params![doc_id, uid],
+        )?;
+        Ok(())
+    }
+
+    /// Lineage by permanent id: every output any version of this paper produced.
+    pub fn derivatives_by_uid(&self, uid: &str, limit: u32) -> Result<Vec<Value>> {
+        let db = self.lock();
+        let mut st = db.prepare(
+            "SELECT parent_doc_id, parent_sha256, job, output_path, output_sha256, call_id, created_at FROM derivatives
+             WHERE uid = ?1 ORDER BY id DESC LIMIT ?2",
+        )?;
+        let rows = st.query_map(params![uid, limit], |r| {
+            Ok(serde_json::json!({
+                "doc_id": r.get::<_, String>(0)?, "parent_sha256": r.get::<_, String>(1)?, "job": r.get::<_, String>(2)?,
+                "output_path": r.get::<_, String>(3)?, "output_sha256": r.get::<_, String>(4)?,
+                "call_id": r.get::<_, Option<i64>>(5)?, "created_at": r.get::<_, String>(6)?,
             }))
         })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)

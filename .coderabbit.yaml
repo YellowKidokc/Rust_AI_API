@@ -1,0 +1,22 @@
+# api_all/ is a byte-for-byte import of YellowKidokc/API_ALL (see api_all/FORGE.md). Review only what was written
+# here, not the archive; the full import is ~970 files, over CodeRabbit's per-review file limit.
+reviews:
+  path_filters:
+    - "!api_all/0*/**"
+    - "!api_all/*.md"
+    - "!api_all/.gitignore"
+    - "!api_all/API_HOME/lenses/**"
+    - "!api_all/API_HOME/templates/PAPER_FOLDER/**"
+    - "!api_all/API_HOME/templates/*.html"
+    - "!api_all/API_HOME/stations/0*/**"
+    - "!api_all/API_HOME/stations/2*/**"
+    - "!api_all/API_HOME/stations/3*/**"
+    - "!api_all/API_HOME/stations/42_*/**"
+    - "!api_all/API_HOME/stations/43_*/**"
+    - "!api_all/API_HOME/stations/44_*/**"
+    - "!api_all/API_HOME/stations/45_*/**"
+    - "!api_all/API_HOME/stations/46_*/**"
+    - "!api_all/API_HOME/stations/5*/**"
+    - "!api_all/API_HOME/stations/6*/**"
+    - "!api_all/API_HOME/stations/90_*/**"
+    - "!api_all/API_HOME/stations/91_*/**"

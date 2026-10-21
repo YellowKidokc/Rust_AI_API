@@ -39,17 +39,22 @@ pub struct Prepared {
     pub text_sha256: String,
     /// What the note's own front matter asked for (route, reason).
     pub note_route: Option<(String, String)>,
+    /// The paper's permanent id, if it already has one (`forge_uid:`).
+    pub uid: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DocResult {
     pub doc_id: String,
+    /// Permanent paper id (empty only if the file couldn't be read).
+    pub uid: String,
     pub path: String,
     pub status: String, // DONE | SKIPPED | FAILED | DRY_RUN | STOPPED
     pub output: Option<String>,
     pub provider: Option<String>,
     pub model: Option<String>,
     pub cost_usd: f64,
+    pub tokens: u32,
     /// Route used, and why it was chosen.
     pub route: Option<String>,
     pub detail: Option<String>,
@@ -215,9 +220,12 @@ impl Forge {
         }
         messages.push(Message::user(user));
         let note_route = hints::resolve(&hints::read(&text), &self.config.settings.hints);
+        // Hashes ignore the `forge_uid:` line: stamping the id must not make a paper look edited.
+        let hashed = crate::uid::strip(&text);
         Ok(Prepared {
-            source_hash: source_hash(&text, &tpl),
-            text_sha256: hex::encode(Sha256::digest(text.as_bytes())),
+            uid: crate::uid::read(&text),
+            source_hash: source_hash(&hashed, &tpl),
+            text_sha256: hex::encode(Sha256::digest(hashed.as_bytes())),
             template: tpl,
             messages,
             note_route,
@@ -228,12 +236,14 @@ impl Forge {
         let id = doc_id(path);
         let mut res = DocResult {
             doc_id: id.clone(),
+            uid: String::new(),
             path: path.display().to_string(),
             status: "FAILED".into(),
             output: None,
             provider: None,
             model: None,
             cost_usd: 0.0,
+            tokens: 0,
             route: None,
             detail: None,
         };
@@ -243,18 +253,30 @@ impl Forge {
             source_hash: hash,
             text_sha256,
             note_route,
-        } = match self.prepare(path, &opts.job) {
+            uid: _,
+        } = match crate::uid::ensure(&self.store, path, !opts.dry_run).and_then(|u| {
+            res.uid = u.uid;
+            self.prepare(path, &opts.job)
+        }) {
             Ok(x) => x,
             Err(e) => {
                 res.detail = Some(format!("{e:#}"));
                 return res;
             }
         };
+        let uid = res.uid.clone();
         if !opts.redo {
-            if let Ok(Some(d)) = self.store.doc_get(&id) {
-                if d.status == "DONE"
+            let legacy = self.store.doc_get(&id).ok().flatten().is_some_and(|d| {
+                d.status == "DONE"
                     && d.source_hash.as_deref() == Some(&hash)
                     && d.job.as_deref() == Some(&opts.job)
+            });
+            {
+                if legacy
+                    || self
+                        .store
+                        .doc_job_done(&id, &opts.job, &hash)
+                        .unwrap_or(false)
                 {
                     res.status = "SKIPPED".into();
                     res.detail = Some("unchanged since last run (use --redo to run again)".into());
@@ -292,6 +314,7 @@ impl Forge {
             json_mode: tpl.json,
             task: format!("run:{}", opts.job),
             doc_id: Some(id.clone()),
+            uid: Some(uid.clone()),
             no_cache: opts.redo,
             ..Default::default()
         };
@@ -321,8 +344,8 @@ impl Forge {
                 let out_path = opts.outbox.join(outbox_name(path, &tpl.suffix));
                 let out_sha = hex::encode(Sha256::digest(body.as_bytes()));
                 let doc = format!(
-                    "---\nsource: '{}'\njob: {}\nroute: {}\nprovider: {}\nmodel: {}\ntokens_in: {}\ntokens_out: {}\ncost_usd: {:.6}\ncall_id: {}\ncreated: {}\n---\n\n{}\n",
-                    path_s.replace('\'', "''"), opts.job, r.route, r.provider, r.model, r.reply.prompt_tokens,
+                    "---\nsource: '{}'\nsource_uid: {}\njob: {}\nroute: {}\nprovider: {}\nmodel: {}\ntokens_in: {}\ntokens_out: {}\ncost_usd: {:.6}\ncall_id: {}\ncreated: {}\n---\n\n{}\n",
+                    path_s.replace('\'', "''"), uid, opts.job, r.route, r.provider, r.model, r.reply.prompt_tokens,
                     r.reply.completion_tokens, r.cost_usd, r.call_id.unwrap_or(0), now(), body.trim_end()
                 );
                 let write = std::fs::create_dir_all(&opts.outbox)
@@ -361,17 +384,20 @@ impl Forge {
                     &out_sha,
                     r.call_id,
                 );
+                let _ = self.store.tag_uid(&id, &uid);
                 res.status = "DONE".into();
                 res.output = Some(out_path.display().to_string());
                 res.provider = Some(r.provider);
                 res.model = Some(r.model);
                 res.cost_usd = r.cost_usd;
+                res.tokens = r.reply.prompt_tokens + r.reply.completion_tokens;
                 res
             }
             Err(f) => {
                 let _ = self
                     .store
                     .doc_upsert(&id, &path_s, &opts.job, &hash, "FAILED", None, None);
+                let _ = self.store.tag_uid(&id, &uid);
                 res.detail = Some(format!(
                     "{}{}",
                     f.message,
@@ -403,12 +429,14 @@ impl Forge {
             if stop.load(Ordering::SeqCst) {
                 results.push(DocResult {
                     doc_id: doc_id(&path),
+                    uid: String::new(),
                     path: path.display().to_string(),
                     status: "STOPPED".into(),
                     output: None,
                     provider: None,
                     model: None,
                     cost_usd: 0.0,
+                    tokens: 0,
                     route: None,
                     detail: Some("not started: stop requested".into()),
                 });
@@ -446,12 +474,14 @@ impl Forge {
 fn panic_result(e: tokio::task::JoinError) -> DocResult {
     DocResult {
         doc_id: "?".into(),
+        uid: String::new(),
         path: "?".into(),
         status: "FAILED".into(),
         output: None,
         provider: None,
         model: None,
         cost_usd: 0.0,
+        tokens: 0,
         route: None,
         detail: Some(format!("worker crashed: {e}")),
     }

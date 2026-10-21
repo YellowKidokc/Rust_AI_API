@@ -22,6 +22,7 @@ architecture (event buses, WASM plugins, HUDs, graph views) until real use asks 
 | **semtag** (Rust) | same workspace: `crates/semtag-core`, `crates/semtag-cli` | Note-side tag format (byte-compatible with the Obsidian plugin), TSNS, fold, CSV, Mermaid | Call models directly (it should go through forge-core) |
 | **ClipSync server** (Node/Hono + SQLite) | `CLIPBOARD-REACT`, branch `claude/synology-home` | Clip/bookmark/prompt **data** on the Synology (Docker), the PWA UI, Cloudflare Tunnel + Access, the capture script, a data-only MCP (`/api/mcp`: search/get/create clips) | Grow its own AI scheduler/organizer (that's forge's `clips` job) |
 | **Desktop app** (Tauri, not built) | plan in `docs/DESKTOP_APP_NOTES.md` (+ semtag spec Part B in `docs/semtag-build-prompt.md`) | Tray square, paste bar, full window, hotkeys, selection actions; loads David's own HTML | Hold API keys; it calls forge and ClipSync |
+| **api_all** (Python stations) | `api_all/` in this workspace, imported verbatim from `API_ALL` (see `api_all/FORGE.md`) | The ONE_MENU stations, their prompts, rubrics, specs and the legacy pipeline scripts | Talk to providers directly once `FORGE_URL` is set: every station that calls through ONE_MENU's `engine/llm.py` goes through forge's gateway. The legacy scripts in `api_all/FORGE.md`'s table still call providers directly until they are migrated |
 | `clipsync-cloudflare-app/` | in this workspace (from the semtag branch) | An older/alternate React front end that expects an API at `:8787/api` | (**open question**: is it superseded by CLIPBOARD-REACT? see §6) |
 
 There are about 13 other `*clip*` repos on David's account (ClipSync-CF, Synology-Clipboard, clipboard-sync-platform, …).
@@ -92,7 +93,8 @@ Not verified: any real provider call (no keys were available where it was built)
 
 - Is `clipsync-cloudflare-app/` (in this repo) still wanted, or is CLIPBOARD-REACT's UI the one? If superseded,
   remove it (and its committed `dist/`) in a separate PR.
-- Which Synology model (x86_64 or ARM)? It decides how forge gets built for it.
+- ~~Which Synology model?~~ **DS923+, 32 GB RAM** (AMD Ryzen R1600, x86_64): forge builds as a plain
+  `x86_64-unknown-linux-musl` binary or a Docker image; no ARM cross-compile needed.
 - How many clips should the hourly sort take per run on the free tier (quotas are per day)?
 
 ## 7. Working with David

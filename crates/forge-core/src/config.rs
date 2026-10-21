@@ -293,6 +293,10 @@ pub struct Settings {
     pub cache: CacheCfg,
     #[serde(default)]
     pub hints: Vec<RouteHint>,
+    /// Prepended as a system block to every call. Relative paths resolve against the `config/` parent.
+    /// Unset = `GLOBAL_FOCUS.md` next to `BRIEF.md`.
+    #[serde(default)]
+    pub focus_file: Option<String>,
 }
 
 fn d_conc() -> usize {
@@ -389,6 +393,12 @@ impl Paths {
     }
     pub fn brief_path(&self) -> PathBuf {
         self.base.join("BRIEF.md")
+    }
+    pub fn focus_path(&self, configured: Option<&str>) -> PathBuf {
+        match configured {
+            Some(p) if !p.trim().is_empty() => self.base.join(p),
+            _ => self.base.join("GLOBAL_FOCUS.md"),
+        }
     }
 }
 
