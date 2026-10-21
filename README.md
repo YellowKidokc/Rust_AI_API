@@ -121,6 +121,37 @@ forge clips review \\NAS\clips\Library --route default                          
   (merge/rename suggestions, misfiled clips, what stands out, likely junk) and changes nothing.
 - `station\CLIPS SETUP.bat` sets the two folders, shows a dry run, and registers both as Windows scheduled tasks.
 
+## Permanent paper ids, focus, staged runs
+
+**Permanent ids.** Every paper gets `forge_uid: <ULID>` in its front matter the first time a run (or
+`forge uid backfill FOLDER --apply`) sees it. The id survives edits, renames and moves; content hashes
+stay underneath as versions, and hashes ignore the `forge_uid:` line, so stamping a paper doesn't
+make it look edited. With no front matter id, forge matches by the same path, then by identical
+content, and otherwise mints a new id. It never matches on "looks similar". Every case except a front matter hit is
+listed by `forge uid orphans` for review. `forge uid show <uid>` lists every version and output.
+Calls, document state and lineage rows all carry the uid.
+
+**GLOBAL_FOCUS.md.** If `GLOBAL_FOCUS.md` sits next to `BRIEF.md` (or `settings.focus_file` names
+another file), it is prepended as a system block to **every** call: pipeline, `ask`, HTTP, MCP.
+It is read on every call, so an edit applies to the next call. The focus is part of the cache key, so changing it
+never serves a stale $0 reply. Each ledger row records `focus_sha256` (`off` with `forge ask --no-focus`).
+
+**Staged runs.** `forge runs start INBOX --stage summarize,extract-claims --stage review --mode first-then-approve`.
+Jobs inside a stage run side by side; the next stage waits; a failed job marks that paper's later
+stages `blocked`. Modes: `all`, `first-then-approve` (stop after paper 1 until `forge runs approve <id>`),
+`step` (approve every paper). `pause`, `resume` and `cancel` act at the next stage boundary and never kill a
+call in flight. Run state lives in SQLite. If `forge serve` restarts, it parks runs that were left
+`running` as `paused`, so nothing spends money again until you resume. The confirmation above 10 docs or $0.50 still
+applies. `forge runs grid [id]` prints the per-paper status grid. Every stage reads the original paper;
+stage outputs don't feed the next stage yet.
+
+**The workspace page.** `forge serve` serves `ui/api-workspace.html` (Kimi's design) at
+`http://127.0.0.1:8790/`, live-wired: Dashboard = `GET /api/grid` (rows by uid, columns by job),
+Quick Run / Workflows start runs (`POST /api/runs`) and drive the gate, Pause, Resume and Stop
+(`POST /api/runs/{id}/{approve|pause|resume|cancel}`). Click a paper for its history (`GET /api/uid/{uid}`).
+Opened as a plain file, it's still the sample prototype. A copy at `<home>/ui/api-workspace.html` overrides
+the built-in one, so you can edit it without rebuilding.
+
 ## The workbench page: `ui/workbench.html`
 
 One HTML file that runs papers through API stations, driven entirely by an **API pack** (JSON you can export, edit, and

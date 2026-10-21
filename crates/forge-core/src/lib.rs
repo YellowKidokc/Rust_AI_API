@@ -9,6 +9,8 @@
 //! * [`pipeline`] INBOX -> OUTBOX runs, context import
 //! * [`hints`]    a note's front matter picks its own route (`priority: draft`, `compute: deep`)
 //! * [`clips`]    clipboard librarian: file clips by category, hold back secrets, periodic review
+//! * [`uid`]      permanent paper ids (`forge_uid:` front matter) on top of content-hash lineage
+//! * [`runs`]     run modes, approval gate, pause/resume, and the per-paper status grid
 //! * [`canon`]    /candidate, /search, /agenda for the Canon Workbench pages
 
 pub mod canon;
@@ -20,9 +22,11 @@ pub mod parse;
 pub mod pipeline;
 pub mod provider;
 pub mod router;
+pub mod runs;
 pub mod store;
 pub mod template;
 pub mod types;
+pub mod uid;
 
 use std::sync::Arc;
 

@@ -32,6 +32,10 @@ pub struct RouteRequest {
     pub doc_id: Option<String>,
     /// Always call a model, even if this exact request was answered before.
     pub no_cache: bool,
+    /// Permanent paper id, recorded on every ledger row for this request.
+    pub uid: Option<String>,
+    /// Send without GLOBAL_FOCUS.md. Logged on the call row as `focus_sha256 = "off"`.
+    pub no_focus: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -323,7 +327,36 @@ impl Router {
         None
     }
 
-    pub async fn complete(&self, req: RouteRequest) -> Result<Routed, RouteFailure> {
+    /// GLOBAL_FOCUS.md text and its SHA-256, if the file exists and isn't blank. Read per call so an
+    /// edit takes effect on the next request.
+    pub fn focus(&self) -> Option<(String, String)> {
+        let path = self
+            .cfg
+            .paths
+            .focus_path(self.cfg.settings.focus_file.as_deref());
+        let raw = std::fs::read_to_string(path).ok()?;
+        let text = raw
+            .strip_prefix('\u{feff}')
+            .unwrap_or(&raw)
+            .trim()
+            .to_string();
+        if text.is_empty() {
+            return None;
+        }
+        let sha = hex::encode(Sha256::digest(text.as_bytes()));
+        Some((text, sha))
+    }
+
+    pub async fn complete(&self, mut req: RouteRequest) -> Result<Routed, RouteFailure> {
+        // Focus goes in before the cache key is computed, so changing the focus can't serve a stale reply.
+        let focus_sha = if req.no_focus {
+            Some("off".to_string())
+        } else if let Some((text, sha)) = self.focus() {
+            req.messages.insert(0, Message::system(text));
+            Some(sha)
+        } else {
+            None
+        };
         let (route, plan) = self.plan(&req).map_err(|m| RouteFailure {
             message: m,
             plan: vec![],
@@ -355,6 +388,8 @@ impl Router {
                         req.task.clone()
                     },
                     doc_id: req.doc_id.clone(),
+                    uid: req.uid.clone(),
+                    focus_sha256: focus_sha.clone(),
                     route: Some(route.clone()),
                     provider: hit.provider.clone(),
                     model: hit.model.clone(),
@@ -428,6 +463,8 @@ impl Router {
                         req.task.clone()
                     },
                     doc_id: req.doc_id.clone(),
+                    uid: req.uid.clone(),
+                    focus_sha256: focus_sha.clone(),
                     route: Some(route.clone()),
                     provider: step.provider.clone(),
                     model: step.model.clone(),
@@ -774,6 +811,63 @@ mod tests {
         assert!(!fresh.cached);
         // Cache hits don't use up a free tier's daily quota.
         assert_eq!(r.store.requests_today("a", "m").unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn focus_rides_every_call_and_a_focus_change_misses_the_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let providers = r#"{"a":{"base":"mock://","wire":"mock","no_key":true}}"#;
+        let settings = r#"{"routes":{"default":[{"provider":"a","model":"m"}]}}"#;
+        let cfg =
+            Config::from_strings(providers, settings, dir.path().to_path_buf(), None).unwrap();
+        let r = Router::new(cfg, Store::open_memory().unwrap()).unwrap();
+        let focus = dir.path().join("GLOBAL_FOCUS.md");
+        let sha_of = |r: &Router| -> Option<String> {
+            r.store
+                .lock()
+                .query_row(
+                    "SELECT focus_sha256 FROM calls ORDER BY id DESC LIMIT 1",
+                    [],
+                    |x| x.get(0),
+                )
+                .unwrap()
+        };
+
+        assert!(!r.complete(ask("q")).await.unwrap().cached);
+        assert_eq!(sha_of(&r), None, "no focus file: nothing recorded");
+
+        std::fs::write(&focus, "Focus: Law 4 only.").unwrap();
+        let one = r.complete(ask("q")).await.unwrap();
+        assert!(
+            !one.cached,
+            "adding a focus must not reuse the focus-less reply"
+        );
+        let sha1 = sha_of(&r).unwrap();
+        assert!(
+            r.complete(ask("q")).await.unwrap().cached,
+            "same focus, same question: cached"
+        );
+        assert_eq!(sha_of(&r).unwrap(), sha1, "cache hits record the focus too");
+
+        std::fs::write(&focus, "Focus: Law 9 only.").unwrap();
+        assert!(
+            !r.complete(ask("q")).await.unwrap().cached,
+            "changed focus must miss the cache"
+        );
+        assert_ne!(sha_of(&r).unwrap(), sha1);
+
+        let off = r
+            .complete(RouteRequest {
+                no_focus: true,
+                ..ask("q")
+            })
+            .await
+            .unwrap();
+        assert!(
+            off.cached,
+            "--no-focus is the same request as the focus-less first one"
+        );
+        assert_eq!(sha_of(&r).as_deref(), Some("off"));
     }
 
     #[test]

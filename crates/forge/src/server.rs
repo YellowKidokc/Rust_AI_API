@@ -7,6 +7,9 @@
 //!   `POST /candidate`
 //! * humans and other agents: `GET /route/plan`, `GET /ledger/recent`, `GET /ledger/stats`,
 //!   `GET /context/search`
+//! * the API workspace page at `/`, backed by `GET /api/grid` (rows by permanent uid, columns by job),
+//!   `GET|POST /api/runs`, `POST /api/runs/{id}/{approve|pause|resume|cancel}`, `GET /api/uid/...`,
+//!   `GET /api/focus`
 //!
 //! Keys stay in this process. Browsers are only allowed from `file://` pages (Origin `null`) and
 //! localhost, plus `server.cors_origins`, so a website you visit can't spend your credits.
@@ -14,13 +17,14 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::extract::{Query, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router as Http};
 use forge_core::canon::{self, CandidateInput, CanonError};
 use forge_core::router::{RouteFailure, Routed};
+use forge_core::runs;
 use forge_core::{Forge, Message, RouteRequest};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -54,6 +58,16 @@ pub fn app(forge: Arc<Forge>) -> Http {
         .route("/ledger/recent", get(ledger_recent))
         .route("/ledger/stats", get(ledger_stats))
         .route("/context/search", get(context_search))
+        .route("/", get(workspace_page))
+        .route("/workspace", get(workspace_page))
+        .route("/api/grid", get(grid))
+        .route("/api/runs", get(runs_list).post(runs_start))
+        .route("/api/runs/{id}", get(runs_get))
+        .route("/api/runs/{id}/{action}", post(runs_action))
+        .route("/api/uid/orphans", get(uid_orphans))
+        .route("/api/uid/{uid}", get(uid_show))
+        .route("/api/focus", get(focus))
+        .route("/api/templates", get(templates))
         .layer(cors)
         .with_state(forge)
 }
@@ -329,6 +343,157 @@ async fn plan(State(f): S, Query(q): Query<SearchQ>) -> Result<Json<Value>, ApiE
     ))
 }
 
+/// The workspace page: `<base>/ui/api-workspace.html` if present (edit without rebuilding), else the
+/// copy built into the binary.
+async fn workspace_page(State(f): S) -> axum::response::Html<String> {
+    const BUILT_IN: &str = include_str!("../../../ui/api-workspace.html");
+    let disk = std::fs::read_to_string(f.config.paths.base.join("ui").join("api-workspace.html"));
+    axum::response::Html(disk.unwrap_or_else(|_| BUILT_IN.to_string()))
+}
+
+#[derive(Deserialize)]
+struct GridQ {
+    run: Option<String>,
+}
+
+async fn grid(State(f): S, Query(q): Query<GridQ>) -> Result<Json<Value>, ApiError> {
+    runs::grid(&f.store, q.run.as_deref())
+        .map(Json)
+        .map_err(|e| ApiError(StatusCode::NOT_FOUND, json!({"error": format!("{e:#}")})))
+}
+
+async fn runs_list(State(f): S) -> Result<Json<Value>, ApiError> {
+    Ok(Json(
+        json!({"runs": runs::list(&f.store, 50).map_err(internal)?}),
+    ))
+}
+
+async fn runs_get(State(f): S, Path(id): Path<String>) -> Result<Json<Value>, ApiError> {
+    runs::get(&f.store, &id)
+        .map(|r| Json(json!(r)))
+        .map_err(|e| ApiError(StatusCode::NOT_FOUND, json!({"error": format!("{e:#}")})))
+}
+
+#[derive(Deserialize)]
+struct StartReq {
+    path: String,
+    /// `[["summary","claims"],["review"]]`
+    stages: Vec<Vec<String>>,
+    #[serde(default = "mode_all")]
+    mode: String,
+    out: Option<String>,
+    route: Option<String>,
+    workers: Option<usize>,
+    #[serde(default)]
+    redo: bool,
+    /// Required above 10 documents (the CLI asks; a page has to say so).
+    #[serde(default)]
+    confirm: bool,
+}
+
+fn mode_all() -> String {
+    "all".into()
+}
+
+fn bad(e: impl std::fmt::Display) -> ApiError {
+    ApiError(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        json!({"error": e.to_string()}),
+    )
+}
+
+/// Run in the background; the page polls `/api/grid`.
+fn spawn_run(f: &Arc<Forge>, id: String) {
+    let f = Arc::clone(f);
+    tokio::spawn(async move {
+        if let Err(e) = runs::execute(&f, &id).await {
+            tracing::warn!("run {id}: {e:#}");
+        }
+    });
+}
+
+async fn runs_start(State(f): S, Json(b): Json<StartReq>) -> Result<Json<Value>, ApiError> {
+    let mode: runs::Mode = b.mode.parse().map_err(bad)?;
+    let path = std::path::PathBuf::from(&b.path);
+    let docs = forge_core::pipeline::collect(&path).map_err(bad)?;
+    if docs.is_empty() {
+        return Err(bad(format!("no .md/.txt documents at {}", b.path)));
+    }
+    if docs.len() > 10 && !b.confirm {
+        return Err(ApiError(
+            StatusCode::CONFLICT,
+            json!({"error": "more than 10 documents: resend with confirm: true", "documents": docs.len(), "needs_confirm": true}),
+        ));
+    }
+    let spec = runs::RunSpec {
+        stages: b.stages,
+        outbox: b
+            .out
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| crate::mcp::default_outbox(&path)),
+        route: b.route,
+        redo: b.redo,
+        workers: b.workers.unwrap_or(4).clamp(1, 60),
+    };
+    let r = runs::create(&f, mode, spec, docs).map_err(bad)?;
+    spawn_run(&f, r.id.clone());
+    Ok(Json(json!(r)))
+}
+
+async fn runs_action(
+    State(f): S,
+    Path((id, action)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    let r = match action.as_str() {
+        "approve" => runs::approve(&f.store, &id),
+        "resume" => runs::resume(&f.store, &id),
+        "pause" => runs::pause(&f.store, &id),
+        "cancel" => runs::cancel(&f.store, &id),
+        _ => {
+            return Err(ApiError(
+                StatusCode::NOT_FOUND,
+                json!({"error": "want approve | pause | resume | cancel"}),
+            ))
+        }
+    }
+    .map_err(|e| ApiError(StatusCode::CONFLICT, json!({"error": format!("{e:#}")})))?;
+    if r.status == "running" {
+        spawn_run(&f, id);
+    }
+    Ok(Json(json!(r)))
+}
+
+async fn uid_orphans(State(f): S) -> Result<Json<Value>, ApiError> {
+    Ok(Json(
+        json!({"orphans": forge_core::uid::orphans(&f.store, 200).map_err(internal)?}),
+    ))
+}
+
+async fn uid_show(State(f): S, Path(uid): Path<String>) -> Result<Json<Value>, ApiError> {
+    Ok(Json(json!({
+        "uid": uid,
+        "versions": forge_core::uid::versions(&f.store, &uid).map_err(internal)?,
+        "outputs": f.store.derivatives_by_uid(&uid, 200).map_err(internal)?,
+    })))
+}
+
+async fn templates(State(f): S) -> Json<Value> {
+    Json(json!({"templates": forge_core::template::list(&f.config.paths.templates_dir)}))
+}
+
+async fn focus(State(f): S) -> Json<Value> {
+    let path = f
+        .config
+        .paths
+        .focus_path(f.config.settings.focus_file.as_deref());
+    match f.router.focus() {
+        Some((text, sha)) => {
+            Json(json!({"path": path, "active": true, "sha256": sha, "text": text}))
+        }
+        None => Json(json!({"path": path, "active": false})),
+    }
+}
+
 async fn ledger_recent(State(f): S, Query(q): Query<SearchQ>) -> Result<Json<Value>, ApiError> {
     Ok(Json(
         json!({"calls": f.store.recent_calls(q.limit.unwrap_or(20).min(500)).map_err(internal)?}),
@@ -477,5 +642,85 @@ mod tests {
         )
         .await;
         assert_eq!(gen["provider"], "mock");
+    }
+
+    #[tokio::test]
+    async fn workspace_page_and_a_gated_run_through_http() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("templates")).unwrap();
+        std::fs::write(
+            dir.path().join("templates/a.md"),
+            "---\nsuffix: A\n---\n{{ document }}",
+        )
+        .unwrap();
+        let inbox = dir.path().join("INBOX");
+        std::fs::create_dir_all(&inbox).unwrap();
+        for i in 0..2 {
+            std::fs::write(inbox.join(format!("p{i}.md")), format!("paper {i}")).unwrap();
+        }
+        let mut cfg = Config::from_strings(
+            DEFAULT_PROVIDERS,
+            DEFAULT_SETTINGS,
+            dir.path().to_path_buf(),
+            None,
+        )
+        .unwrap();
+        cfg.settings.default_route = Some("test".into());
+        let f = Forge::with_store(cfg, forge_core::Store::open_memory().unwrap()).unwrap();
+
+        let resp = app(f.clone())
+            .oneshot(Request::get("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let html = resp.into_body().collect().await.unwrap().to_bytes();
+        assert!(String::from_utf8_lossy(&html).contains("<html"));
+
+        let (st, run, _) = call(
+            app(f.clone()),
+            post("/api/runs", json!({"path": inbox.display().to_string(), "stages": [["a"]], "mode": "first-then-approve"})),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{run}");
+        let id = run["id"].as_str().unwrap().to_string();
+        // The run executes in the background; wait for the gate.
+        let mut grid = Value::Null;
+        for _ in 0..200 {
+            let (_, g, _) = call(
+                app(f.clone()),
+                Request::get(format!("/api/grid?run={id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await;
+            if g["run"]["status"] == "awaiting_approval" {
+                grid = g;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!(grid["rows"][0]["cells"]["a"]["status"], "ok", "{grid}");
+        assert_eq!(grid["rows"][1]["cells"]["a"]["status"], "awaiting_approval");
+        assert_eq!(grid["rows"][0]["uid"].as_str().unwrap().len(), 26);
+
+        let (st, _, _) = call(
+            app(f.clone()),
+            post(&format!("/api/runs/{id}/resume"), json!({})),
+        )
+        .await;
+        assert_eq!(st, StatusCode::CONFLICT, "the gate needs approve");
+        let (st, _, _) = call(
+            app(f.clone()),
+            post(&format!("/api/runs/{id}/approve"), json!({})),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        for _ in 0..200 {
+            if forge_core::runs::get(&f.store, &id).unwrap().status == "done" {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("run never finished");
     }
 }

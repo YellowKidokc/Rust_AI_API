@@ -59,6 +59,9 @@ enum Cmd {
         /// Call a model even if this exact question was answered before.
         #[arg(long)]
         no_cache: bool,
+        /// Send without GLOBAL_FOCUS.md (logged on the call row).
+        #[arg(long)]
+        no_focus: bool,
     },
     /// Show what a route would try right now and why rungs are skipped.
     Plan {
@@ -87,6 +90,16 @@ enum Cmd {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Staged runs with modes, an approval gate, pause/resume. State survives restarts.
+    Runs {
+        #[command(subcommand)]
+        cmd: RunsCmd,
+    },
+    /// Permanent paper ids (`forge_uid:` in front matter).
+    Uid {
+        #[command(subcommand)]
+        cmd: UidCmd,
+    },
     /// Context library: import, add, search.
     Context {
         #[command(subcommand)]
@@ -108,6 +121,70 @@ enum Cmd {
     Doctor,
     /// Write default config/ and templates/ into a folder (never overwrites).
     Init { dir: Option<PathBuf> },
+}
+
+#[derive(Subcommand)]
+enum RunsCmd {
+    /// Start a run over a file or folder. Each --stage is a comma list of jobs that run side by side.
+    Start {
+        path: PathBuf,
+        /// e.g. --stage summary,claims --stage review
+        #[arg(long = "stage", required = true)]
+        stages: Vec<String>,
+        /// all | first-then-approve | step
+        #[arg(long, default_value = "all")]
+        mode: String,
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        route: Option<String>,
+        #[arg(long, default_value_t = 4)]
+        workers: usize,
+        #[arg(long)]
+        redo: bool,
+        /// Skip the confirmation for more than 10 documents or $0.50.
+        #[arg(long)]
+        yes: bool,
+    },
+    List {
+        #[arg(long, default_value_t = 20)]
+        limit: u32,
+    },
+    /// The per-paper status grid (latest run if no id).
+    Grid {
+        id: Option<String>,
+    },
+    /// Pass the gate and keep going (in this terminal).
+    Approve {
+        id: String,
+    },
+    Pause {
+        id: String,
+    },
+    /// Continue a paused or failed run from its cursor (in this terminal).
+    Resume {
+        id: String,
+    },
+    Cancel {
+        id: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum UidCmd {
+    /// Give every paper in a folder a permanent id. Dry run unless --apply.
+    Backfill {
+        path: PathBuf,
+        #[arg(long)]
+        apply: bool,
+    },
+    /// Papers whose id was minted or reattached without front matter: review these.
+    Orphans {
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+    },
+    /// Every version and output a uid has.
+    Show { uid: String },
 }
 
 #[derive(Subcommand)]
@@ -217,6 +294,10 @@ async fn real_main(cli: Cli) -> Result<()> {
         Cmd::Init { .. } => unreachable!(),
         Cmd::Serve { port, host } => {
             let port = port.unwrap_or(forge.config.settings.server.port);
+            let parked = forge_core::runs::park_orphaned(&forge.store)?;
+            if parked > 0 {
+                eprintln!("{parked} run(s) were left running by a previous process; paused. `forge runs resume <id>` to continue.");
+            }
             server::serve(forge, &host, port).await
         }
         Cmd::Mcp => mcp::run(forge).await,
@@ -228,6 +309,7 @@ async fn real_main(cli: Cli) -> Result<()> {
             json,
             max_tier,
             no_cache,
+            no_focus,
         } => {
             let prompt = prompt.join(" ");
             if prompt.trim().is_empty() {
@@ -271,6 +353,7 @@ async fn real_main(cli: Cli) -> Result<()> {
                     json_mode: json,
                     max_tier,
                     no_cache,
+                    no_focus,
                     task: "cli:ask".into(),
                     ..Default::default()
                 })
@@ -340,6 +423,8 @@ async fn real_main(cli: Cli) -> Result<()> {
             yes,
             dry_run,
         } => run(forge, path, job, out, route, workers, redo, yes, dry_run).await,
+        Cmd::Runs { cmd } => runs_cmd(forge, cmd).await,
+        Cmd::Uid { cmd } => uid_cmd(&forge, cmd),
         Cmd::Context { cmd } => match cmd {
             CtxCmd::Import { path, kind, lines } => {
                 let n = pipeline::import_context(&forge, &path, &kind, lines)?;
@@ -544,6 +629,51 @@ fn parse_tier(t: Option<String>) -> Result<Option<Tier>> {
     .transpose()
 }
 
+/// Estimate the first eligible rung's cost and, above 10 documents or $0.50, ask before sending.
+/// `jobs` multiplies the estimate (one call per document per job). Returns false if declined.
+fn confirm_spend(
+    forge: &Forge,
+    docs: &[PathBuf],
+    route: &Option<String>,
+    jobs: usize,
+) -> Result<bool> {
+    let (route_name, steps) = forge
+        .router
+        .plan(&RouteRequest {
+            route: route.clone(),
+            ..Default::default()
+        })
+        .map_err(anyhow::Error::msg)?;
+    let first = steps.iter().find(|s| s.eligible);
+    let chars: usize = docs
+        .iter()
+        .filter_map(|d| std::fs::metadata(d).ok())
+        .map(|m| m.len() as usize)
+        .sum();
+    let tokens_in = forge_core::types::estimate_tokens(chars) * jobs.max(1) as u32;
+    let est = first
+        .and_then(|s| forge.router.find_entry(&s.provider, Some(&s.model)))
+        .map(|e| (tokens_in as f64 * e.price_in + tokens_in as f64 * 0.2 * e.price_out) / 1e6)
+        .unwrap_or(0.0);
+    println!(
+        "route {route_name}: first rung {} · ~{tokens_in} input tokens · est. ${est:.4}",
+        first
+            .map(|s| format!("{} / {}", s.provider, s.model))
+            .unwrap_or_else(|| "NONE ELIGIBLE".into())
+    );
+    if docs.len() > 10 || est > 0.5 {
+        print!("Run {} document(s)? type yes: ", docs.len());
+        std::io::stdout().flush()?;
+        let mut line = String::new();
+        std::io::stdin().lock().read_line(&mut line)?;
+        if line.trim() != "yes" {
+            println!("nothing sent.");
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn run(
     forge: Arc<Forge>,
@@ -569,41 +699,8 @@ async fn run(
         outbox.display()
     );
 
-    if !dry_run && !yes {
-        let (route_name, steps) = forge
-            .router
-            .plan(&RouteRequest {
-                route: route.clone(),
-                ..Default::default()
-            })
-            .map_err(anyhow::Error::msg)?;
-        let first = steps.iter().find(|s| s.eligible);
-        let chars: usize = docs
-            .iter()
-            .filter_map(|d| std::fs::metadata(d).ok())
-            .map(|m| m.len() as usize)
-            .sum();
-        let tokens_in = forge_core::types::estimate_tokens(chars);
-        let est = first
-            .and_then(|s| forge.router.find_entry(&s.provider, Some(&s.model)))
-            .map(|e| (tokens_in as f64 * e.price_in + tokens_in as f64 * 0.2 * e.price_out) / 1e6)
-            .unwrap_or(0.0);
-        println!(
-            "route {route_name}: first rung {} · ~{tokens_in} input tokens · est. ${est:.4}",
-            first
-                .map(|s| format!("{} / {}", s.provider, s.model))
-                .unwrap_or_else(|| "NONE ELIGIBLE".into())
-        );
-        if docs.len() > 10 || est > 0.5 {
-            print!("Run {} document(s)? type yes: ", docs.len());
-            std::io::stdout().flush()?;
-            let mut line = String::new();
-            std::io::stdin().lock().read_line(&mut line)?;
-            if line.trim() != "yes" {
-                println!("nothing sent.");
-                return Ok(());
-            }
-        }
+    if !dry_run && !yes && !confirm_spend(&forge, &docs, &route, 1)? {
+        return Ok(());
     }
 
     // Ctrl+C never kills a run (dictation tools send stray ones). Type `stop` to finish in-flight work and exit.
@@ -715,4 +812,192 @@ fn init(dir: PathBuf) -> Result<()> {
     }
     println!("next: set DEEPSEEK_API_KEY (and any others), then `forge doctor`.");
     Ok(())
+}
+
+async fn runs_cmd(forge: Arc<Forge>, cmd: RunsCmd) -> Result<()> {
+    use forge_core::runs;
+    let show = |r: &runs::RunInfo| {
+        println!(
+            "{}  {:<18} {:<18} {}/{} papers{}",
+            r.id,
+            serde_json::to_value(r.mode)
+                .unwrap_or_default()
+                .as_str()
+                .unwrap_or(""),
+            r.status,
+            r.cursor,
+            r.total,
+            r.note
+                .as_ref()
+                .map(|n| format!("  ({n})"))
+                .unwrap_or_default()
+        )
+    };
+    let drive = |id: String| {
+        let forge = Arc::clone(&forge);
+        async move {
+            let r = runs::execute(&forge, &id).await?;
+            show(&r);
+            print_grid(&forge, &id)?;
+            if r.status == "awaiting_approval" {
+                println!("waiting at the gate: `forge runs approve {id}` to continue");
+            }
+            anyhow::Ok(())
+        }
+    };
+    match cmd {
+        RunsCmd::Start {
+            path,
+            stages,
+            mode,
+            out,
+            route,
+            workers,
+            redo,
+            yes,
+        } => {
+            let mode: runs::Mode = mode.parse()?;
+            let stages: Vec<Vec<String>> = stages
+                .iter()
+                .map(|s| {
+                    s.split(',')
+                        .map(|j| j.trim().to_string())
+                        .filter(|j| !j.is_empty())
+                        .collect()
+                })
+                .collect();
+            let docs = pipeline::collect(&path)?;
+            if docs.is_empty() {
+                bail!("no .md/.txt documents at {}", path.display());
+            }
+            let jobs = stages.iter().map(Vec::len).sum();
+            if !yes && !confirm_spend(&forge, &docs, &route, jobs)? {
+                return Ok(());
+            }
+            let spec = runs::RunSpec {
+                stages,
+                outbox: out.unwrap_or_else(|| mcp::default_outbox(&path)),
+                route,
+                redo,
+                workers: workers.clamp(1, 60),
+            };
+            let r = runs::create(&forge, mode, spec, docs)?;
+            println!("started {}", r.id);
+            drive(r.id).await
+        }
+        RunsCmd::List { limit } => {
+            for r in runs::list(&forge.store, limit)? {
+                show(&r);
+            }
+            Ok(())
+        }
+        RunsCmd::Grid { id } => print_grid(&forge, id.as_deref().unwrap_or("")),
+        RunsCmd::Approve { id } => {
+            runs::approve(&forge.store, &id)?;
+            drive(id).await
+        }
+        RunsCmd::Resume { id } => {
+            runs::resume(&forge.store, &id)?;
+            drive(id).await
+        }
+        RunsCmd::Pause { id } => {
+            show(&runs::pause(&forge.store, &id)?);
+            Ok(())
+        }
+        RunsCmd::Cancel { id } => {
+            show(&runs::cancel(&forge.store, &id)?);
+            Ok(())
+        }
+    }
+}
+
+fn print_grid(forge: &Forge, id: &str) -> Result<()> {
+    let g = forge_core::runs::grid(&forge.store, (!id.is_empty()).then_some(id))?;
+    let cols: Vec<String> = g["columns"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|c| format!("{}:{}", c["stage"], c["job"].as_str().unwrap_or("")))
+        .collect();
+    println!(
+        "{:<28} {}",
+        "paper",
+        cols.iter().map(|c| format!("{c:<18}")).collect::<String>()
+    );
+    for row in g["rows"].as_array().into_iter().flatten() {
+        let cells: String = g["columns"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|c| {
+                let st = row["cells"][c["job"].as_str().unwrap_or("")]["status"]
+                    .as_str()
+                    .unwrap_or("-");
+                format!("{st:<18}")
+            })
+            .collect();
+        let name: String = row["doc_id"]
+            .as_str()
+            .unwrap_or("")
+            .chars()
+            .take(27)
+            .collect();
+        println!("{name:<28} {cells}");
+    }
+    println!("total ${:.5}", g["total_cost_usd"].as_f64().unwrap_or(0.0));
+    Ok(())
+}
+
+fn uid_cmd(forge: &Forge, cmd: UidCmd) -> Result<()> {
+    use forge_core::uid;
+    match cmd {
+        UidCmd::Backfill { path, apply } => {
+            let docs = pipeline::collect(&path)?;
+            let (mut minted, mut reattached, mut had) = (0, 0, 0);
+            for d in &docs {
+                let r = uid::ensure(&forge.store, d, apply)?;
+                match r.how {
+                    "front_matter" => had += 1,
+                    "minted" => minted += 1,
+                    _ => reattached += 1,
+                }
+                if r.how != "front_matter" {
+                    println!("{:<8} {}  {}", r.how, r.uid, d.display());
+                }
+            }
+            println!(
+                "{} paper(s): {had} already had an id, {reattached} reattached, {minted} new{}",
+                docs.len(),
+                if apply {
+                    ""
+                } else {
+                    "  (dry run: nothing written; --apply to write)"
+                }
+            );
+            Ok(())
+        }
+        UidCmd::Orphans { limit } => {
+            for o in uid::orphans(&forge.store, limit)? {
+                println!(
+                    "{} {} {}\n    {}",
+                    o["at"].as_str().unwrap_or("").get(..19).unwrap_or(""),
+                    o["uid"].as_str().unwrap_or(""),
+                    o["path"].as_str().unwrap_or(""),
+                    o["reason"].as_str().unwrap_or("")
+                );
+            }
+            Ok(())
+        }
+        UidCmd::Show { uid: u } => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "uid": u,
+                    "versions": uid::versions(&forge.store, &u)?,
+                    "outputs": forge.store.derivatives_by_uid(&u, 100)?,
+                }))?
+            );
+            Ok(())
+        }
+    }
 }
