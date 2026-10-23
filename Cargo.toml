@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/forge-core", "crates/forge", "crates/semtag-core", "crates/semtag-cli"]
+members = ["crates/forge-core", "crates/forge", "crates/forge-tray", "crates/semtag-core", "crates/semtag-cli"]
 
 [workspace.package]
 version = "0.1.0"
