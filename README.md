@@ -35,6 +35,26 @@ Config lookup: `--home <dir>`, else `FORGE_HOME`, else walk up from the current 
 looking for `config\providers.json` or `_system\config\providers.json` (the API workbench's existing files work as-is),
 else built-in defaults.
 
+## Taskbar menu: `forge-tray`
+
+`forge-tray.exe` (built with forge; in the `forge-windows-x64` CI artifact) puts the pipeline in the Windows taskbar.
+Its menu is built from forge's `GET /api/stations`, which runs the pipeline's own `_system\engine\console.py list`
+(the one station feed: nothing is typed into forge or the tray):
+
+```
+Open workspace                      forge's page (ui/api-workspace.html)
+01 · CKG  >  020_CKG  >  1 RUN HERE / 2 RUN ON FOLDER / Open folder
+...
+10 · FIS  >  101_FIS_INVENTORY  >  1 RUN HERE / 2 RUN ON FOLDER / Open folder
+Front stations  >  000_QUICK_CALL ...
+Refresh · Quit
+```
+
+A click runs exactly that station's `.bat`, in its own console, the same as double-clicking it. The OpenAI stations are
+left out (as on the page). Setup: start `forge serve` with `PIPELINE_SYSTEM` set to the pipeline's `API\_system` (or
+start forge from inside `API\`, which it then finds by itself), then run `forge-tray.exe`. `FORGE_URL` points the tray at
+another port. `forge-tray --print` prints the same menu as text.
+
 ## Routes: DeepSeek by default, free when you ask
 
 A route is an ordered ladder in `config/settings.json`. forge tries each rung in order and moves down on a 429, 5xx,

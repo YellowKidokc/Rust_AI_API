@@ -40,6 +40,7 @@ jobs:
           name: forge-windows-x64
           path: |
             target/release/forge.exe
+            target/release/forge-tray.exe
             config/
             templates/
             station/

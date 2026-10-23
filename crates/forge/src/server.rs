@@ -68,6 +68,7 @@ pub fn app(forge: Arc<Forge>) -> Http {
         .route("/api/uid/{uid}", get(uid_show))
         .route("/api/focus", get(focus))
         .route("/api/templates", get(templates))
+        .route("/api/stations", get(stations))
         .layer(cors)
         .with_state(forge)
 }
@@ -341,6 +342,80 @@ async fn plan(State(f): S, Query(q): Query<SearchQ>) -> Result<Json<Value>, ApiE
     Ok(Json(
         json!({"route": route, "steps": steps, "limiter_ceiling": f.router.limiter.ceiling()}),
     ))
+}
+
+/// Every pipeline station, exactly as the pipeline's own `_system/engine/console.py list` prints it (the one station
+/// feed; nothing is re-derived here). The pipeline `_system` folder is `PIPELINE_SYSTEM`, else forge's own base when
+/// that base is a pipeline `_system` (forge started inside `API\`). Python is `PYTHON`, else `py -3` on Windows,
+/// else `python3`. A clear 503 when the feed cannot be read: the page and the tray never fall back to a typed list.
+async fn stations(State(f): S) -> Result<Json<Value>, ApiError> {
+    let console = pipeline_console(&f.config.paths.base).ok_or_else(|| {
+        ApiError(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({"error": "pipeline not found: set PIPELINE_SYSTEM to the API\\_system folder (it holds engine/console.py)"}),
+        )
+    })?;
+    let (program, mut args) = python_command();
+    args.push(console.display().to_string());
+    args.push("list".into());
+    let run = tokio::process::Command::new(&program)
+        .args(&args)
+        .current_dir(
+            console
+                .parent()
+                .and_then(|p| p.parent())
+                .unwrap_or(&f.config.paths.base),
+        )
+        .output();
+    let out = tokio::time::timeout(std::time::Duration::from_secs(60), run)
+        .await
+        .map_err(|_| {
+            ApiError(
+                StatusCode::SERVICE_UNAVAILABLE,
+                json!({"error": "console.py list took over 60 s"}),
+            )
+        })?
+        .map_err(|e| {
+            ApiError(
+                StatusCode::SERVICE_UNAVAILABLE,
+                json!({"error": format!("cannot start {program}: {e}")}),
+            )
+        })?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        return Err(ApiError(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({"error": format!("console.py list failed: {}", err.trim())}),
+        ));
+    }
+    let feed: Value = serde_json::from_slice(&out.stdout).map_err(|e| {
+        ApiError(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({"error": format!("console.py list is not JSON: {e}")}),
+        )
+    })?;
+    Ok(Json(feed))
+}
+
+fn pipeline_console(base: &std::path::Path) -> Option<std::path::PathBuf> {
+    let candidates = std::env::var_os("PIPELINE_SYSTEM")
+        .map(std::path::PathBuf::from)
+        .into_iter()
+        .chain(std::iter::once(base.to_path_buf()));
+    candidates
+        .map(|sys| sys.join("engine").join("console.py"))
+        .find(|p| p.is_file())
+}
+
+fn python_command() -> (String, Vec<String>) {
+    if let Some(p) = std::env::var_os("PYTHON") {
+        return (p.to_string_lossy().into_owned(), vec![]);
+    }
+    if cfg!(windows) {
+        ("py".into(), vec!["-3".into()])
+    } else {
+        ("python3".into(), vec![])
+    }
 }
 
 /// The workspace page: `<base>/ui/api-workspace.html` if present (edit without rebuilding), else the
@@ -642,6 +717,46 @@ mod tests {
         )
         .await;
         assert_eq!(gen["provider"], "mock");
+    }
+
+    #[tokio::test]
+    async fn stations_feed_is_the_pipeline_console_and_never_a_typed_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = |base: std::path::PathBuf| {
+            Config::from_strings(DEFAULT_PROVIDERS, DEFAULT_SETTINGS, base, None).unwrap()
+        };
+        // No pipeline here: a clear 503, not an empty or built-in list.
+        let f = Forge::with_store(
+            cfg(dir.path().to_path_buf()),
+            forge_core::Store::open_memory().unwrap(),
+        )
+        .unwrap();
+        let resp = app(f)
+            .oneshot(Request::get("/api/stations").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        // A pipeline _system whose console.py prints the feed: forge passes it through unchanged.
+        std::fs::create_dir_all(dir.path().join("engine")).unwrap();
+        std::fs::write(
+            dir.path().join("engine/console.py"),
+            "import json\nprint(json.dumps({'stations': [{'number': '101', 'label': '101_FIS_INVENTORY', 'family': '10_FIS'}]}))\n",
+        )
+        .unwrap();
+        let f = Forge::with_store(
+            cfg(dir.path().to_path_buf()),
+            forge_core::Store::open_memory().unwrap(),
+        )
+        .unwrap();
+        let resp = app(f)
+            .oneshot(Request::get("/api/stations").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&resp.into_body().collect().await.unwrap().to_bytes()).unwrap();
+        assert_eq!(body["stations"][0]["family"], "10_FIS");
     }
 
     #[tokio::test]
