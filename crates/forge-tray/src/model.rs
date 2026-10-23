@@ -238,8 +238,14 @@ mod tests {
         std::thread::spawn(move || {
             for (i, stream) in listener.incoming().take(2).enumerate() {
                 let mut s = stream.unwrap();
-                let mut buf = [0u8; 1024];
-                let _ = s.read(&mut buf);
+                // Read the whole request first: closing with unread bytes makes the kernel reset the connection.
+                let (mut req, mut buf) = (Vec::new(), [0u8; 1024]);
+                while !req.windows(4).any(|w| w == b"\r\n\r\n") {
+                    match s.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => req.extend_from_slice(&buf[..n]),
+                    }
+                }
                 let (status, body) = if i == 0 {
                     (
                         "200 OK",
@@ -256,10 +262,8 @@ mod tests {
         });
         let g = build(&fetch(&base).unwrap());
         assert_eq!(g[0].name, "10 · FIS");
-        assert!(fetch(&base)
-            .unwrap_err()
-            .to_string()
-            .contains("pipeline not found"));
+        let e = fetch(&base).unwrap_err().to_string();
+        assert!(e.contains("pipeline not found"), "{e}");
         assert!(fetch("https://example.com").is_err());
     }
 
