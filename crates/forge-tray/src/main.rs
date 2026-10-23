@@ -1,12 +1,16 @@
 //! forge-tray: the pipeline in the Windows taskbar.
 //!
-//!   forge-tray            tray icon; its menu lists every group and station from forge's /api/stations
-//!   forge-tray --print    the same menu as text (any platform; no tray)
+//!   forge-tray            tray icon; starts forge if it isn't running; its menu lists every group and station
+//!   forge-tray --print    the same menu as text (any platform; no tray, starts nothing)
 //!
-//! Menu: Open workspace (forge's page) · one submenu per group (family) · per station its own .bat buttons and
-//! "Open folder" · Refresh · Quit. A click runs exactly the .bat the feed listed, in its own console window, the same
-//! as double-clicking it. The tray never builds a command line of its own and never calls a model.
-//! Forge's address: FORGE_URL (default http://127.0.0.1:8790).
+//! Menu: Open home (every API source on one page) · Open workspace (Kimi's page) · one submenu per group · per station
+//! its own buttons (.bat runs in its own console, .html opens in the browser) and "Open folder" · Troubleshoot ·
+//! Refresh · Quit. A click starts exactly the file the feed listed, the same as double-clicking it. The tray never
+//! builds a command line of its own and never calls a model.
+//!
+//! No port to think about: when nothing answers at FORGE_URL (default http://127.0.0.1:8790), the tray starts the
+//! forge.exe next to it, hidden (`forge --home <its folder> serve`, log in LOGS\forge-serve.log), and stops it again on
+//! Quit. A forge you started yourself is used as it is and left running.
 //! On Windows it is a GUI program (no console window); `--print` is for checking the menu elsewhere.
 
 #![cfg_attr(windows, windows_subsystem = "windows")]
@@ -33,9 +37,68 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The folder this program lives in (the install folder: forge.exe, config, LOGS, TROUBLESHOOT.bat).
+#[cfg_attr(not(windows), allow(dead_code))]
+fn install_dir() -> std::path::PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_else(|| ".".into())
+}
+
+/// Start the forge next to this program when nothing answers at `base`. Returns the child if this call started it.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn start_forge(base: &str) -> Option<std::process::Child> {
+    if model::alive(base) {
+        return None;
+    }
+    let dir = install_dir();
+    let exe = dir.join(if cfg!(windows) { "forge.exe" } else { "forge" });
+    if !exe.is_file() {
+        return None;
+    }
+    let port = base
+        .rsplit(':')
+        .next()
+        .and_then(|p| p.trim_end_matches('/').parse::<u16>().ok())
+        .unwrap_or(8790);
+    let _ = std::fs::create_dir_all(dir.join("LOGS"));
+    let log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("LOGS").join("forge-serve.log"))
+        .ok();
+    let mut cmd = std::process::Command::new(&exe);
+    cmd.arg("--home")
+        .arg(&dir)
+        .args(["serve", "--port", &port.to_string()])
+        .current_dir(&dir)
+        .stdin(std::process::Stdio::null());
+    if let Some(l) = log {
+        if let Ok(l2) = l.try_clone() {
+            cmd.stdout(l2);
+        }
+        cmd.stderr(l);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let child = cmd.spawn().ok()?;
+    for _ in 0..80 {
+        if model::alive(base) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    Some(child)
+}
+
 #[cfg(windows)]
 mod tray {
     use crate::model::{self, Group};
+    use crate::{install_dir, start_forge};
     use std::collections::HashMap;
     use std::process::Command;
     use std::time::Duration;
@@ -69,9 +132,15 @@ mod tray {
             MenuItem::with_id(id, text, enabled, None)
         };
         menu.append(&item(
-            "Open workspace",
+            "Open home",
             true,
             Some(Action::Open(format!("{base}/"))),
+            &mut actions,
+        ))?;
+        menu.append(&item(
+            "Open workspace",
+            true,
+            Some(Action::Open(format!("{base}/workspace"))),
             &mut actions,
         ))?;
         menu.append(&PredefinedMenuItem::separator())?;
@@ -110,6 +179,15 @@ mod tray {
             }
         }
         menu.append(&PredefinedMenuItem::separator())?;
+        let doctor = install_dir().join("TROUBLESHOOT.bat");
+        if doctor.is_file() {
+            menu.append(&item(
+                "Troubleshoot",
+                true,
+                Some(Action::Run(doctor.display().to_string())),
+                &mut actions,
+            ))?;
+        }
         menu.append(&item("Refresh", true, Some(Action::Refresh), &mut actions))?;
         menu.append(&item("Quit", true, Some(Action::Quit), &mut actions))?;
         Ok((menu, actions))
@@ -139,9 +217,10 @@ mod tray {
     }
 
     pub fn run(base: &str) -> anyhow::Result<()> {
+        let mut started = start_forge(base);
         let (menu, mut actions) = build_menu(base)?;
         let tray = TrayIconBuilder::new()
-            .with_tooltip("Pipeline stations")
+            .with_tooltip("API home: pipeline stations")
             .with_icon(icon()?)
             .with_menu(Box::new(menu))
             .build()?;
@@ -159,11 +238,20 @@ mod tray {
                 match actions.get(ev.id.as_ref()) {
                     Some(Action::Run(path)) | Some(Action::Open(path)) => open(path),
                     Some(Action::Refresh) => {
+                        if started.is_none() {
+                            started = start_forge(base);
+                        }
                         let (m, a) = build_menu(base)?;
                         tray.set_menu(Some(Box::new(m)));
                         actions = a;
                     }
-                    Some(Action::Quit) => return Ok(()),
+                    Some(Action::Quit) => {
+                        // Stop only the forge this tray started; one you started yourself keeps running.
+                        if let Some(mut c) = started.take() {
+                            let _ = c.kill();
+                        }
+                        return Ok(());
+                    }
                     None => {}
                 }
             }

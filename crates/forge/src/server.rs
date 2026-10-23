@@ -7,7 +7,9 @@
 //!   `POST /candidate`
 //! * humans and other agents: `GET /route/plan`, `GET /ledger/recent`, `GET /ledger/stats`,
 //!   `GET /context/search`
-//! * the API workspace page at `/`, backed by `GET /api/grid` (rows by permanent uid, columns by job),
+//! * the home page at `/` (every API source and station: `GET /api/stations`, `GET|POST /api/apis`,
+//!   `POST /api/apis/remove`, `POST /api/launch`, `/pages/{i}`; see `apis.rs`)
+//! * the API workspace page at `/workspace`, backed by `GET /api/grid` (rows by permanent uid, columns by job),
 //!   `GET|POST /api/runs`, `POST /api/runs/{id}/{approve|pause|resume|cancel}`, `GET /api/uid/...`,
 //!   `GET /api/focus`
 //!
@@ -26,6 +28,8 @@ use forge_core::canon::{self, CandidateInput, CanonError};
 use forge_core::router::{RouteFailure, Routed};
 use forge_core::runs;
 use forge_core::{Forge, Message, RouteRequest};
+
+use crate::apis;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tower_http::cors::{AllowOrigin, CorsLayer};
@@ -58,7 +62,8 @@ pub fn app(forge: Arc<Forge>) -> Http {
         .route("/ledger/recent", get(ledger_recent))
         .route("/ledger/stats", get(ledger_stats))
         .route("/context/search", get(context_search))
-        .route("/", get(workspace_page))
+        .route("/", get(home_page))
+        .route("/home", get(home_page))
         .route("/workspace", get(workspace_page))
         .route("/api/grid", get(grid))
         .route("/api/runs", get(runs_list).post(runs_start))
@@ -69,6 +74,10 @@ pub fn app(forge: Arc<Forge>) -> Http {
         .route("/api/focus", get(focus))
         .route("/api/templates", get(templates))
         .route("/api/stations", get(stations))
+        .route("/api/apis", get(apis_list).post(apis_add))
+        .route("/api/apis/remove", post(apis_remove))
+        .route("/api/launch", post(launch))
+        .route("/pages/{i}", get(page))
         .layer(cors)
         .with_state(forge)
 }
@@ -344,78 +353,130 @@ async fn plan(State(f): S, Query(q): Query<SearchQ>) -> Result<Json<Value>, ApiE
     ))
 }
 
-/// Every pipeline station, exactly as the pipeline's own `_system/engine/console.py list` prints it (the one station
-/// feed; nothing is re-derived here). The pipeline `_system` folder is `PIPELINE_SYSTEM`, else forge's own base when
-/// that base is a pipeline `_system` (forge started inside `API\`). Python is `PYTHON`, else `py -3` on Windows,
-/// else `python3`. A clear 503 when the feed cannot be read: the page and the tray never fall back to a typed list.
+/// Every station of every API source (`apis.rs`): the main pipeline's `console.py list` rows unchanged, then the other
+/// registered sources' stations, each tagged with `source` and `group`. A clear 503 when nothing can be read: the page
+/// and the tray never fall back to a typed list. Errors of single sources are listed next to the stations.
 async fn stations(State(f): S) -> Result<Json<Value>, ApiError> {
-    let console = pipeline_console(&f.config.paths.base).ok_or_else(|| {
-        ApiError(
-            StatusCode::SERVICE_UNAVAILABLE,
-            json!({"error": "pipeline not found: set PIPELINE_SYSTEM to the API\\_system folder (it holds engine/console.py)"}),
-        )
-    })?;
-    let (program, mut args) = python_command();
-    args.push(console.display().to_string());
-    args.push("list".into());
-    let run = tokio::process::Command::new(&program)
-        .args(&args)
-        .current_dir(
-            console
-                .parent()
-                .and_then(|p| p.parent())
-                .unwrap_or(&f.config.paths.base),
-        )
-        .output();
-    let out = tokio::time::timeout(std::time::Duration::from_secs(60), run)
-        .await
-        .map_err(|_| {
-            ApiError(
-                StatusCode::SERVICE_UNAVAILABLE,
-                json!({"error": "console.py list took over 60 s"}),
-            )
-        })?
-        .map_err(|e| {
-            ApiError(
-                StatusCode::SERVICE_UNAVAILABLE,
-                json!({"error": format!("cannot start {program}: {e}")}),
-            )
-        })?;
-    if !out.status.success() {
-        let err = String::from_utf8_lossy(&out.stderr);
+    let (sources, reg_error) = apis::resolve(&f.config.paths.base).await;
+    let stations: Vec<Value> = sources.iter().flat_map(|r| r.stations.clone()).collect();
+    let mut errors: Vec<Value> = sources
+        .iter()
+        .filter_map(|r| {
+            r.error
+                .as_ref()
+                .map(|e| json!({"source": r.source.name, "error": e}))
+        })
+        .collect();
+    if let Some(e) = reg_error {
+        errors.push(json!({"source": "config/apis.json", "error": e}));
+    }
+    if stations.is_empty() {
+        let msg = errors
+            .first()
+            .and_then(|e| e["error"].as_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                "pipeline not found: add your API folder on the home page (or set PIPELINE_SYSTEM to API\\_system)"
+                    .into()
+            });
         return Err(ApiError(
             StatusCode::SERVICE_UNAVAILABLE,
-            json!({"error": format!("console.py list failed: {}", err.trim())}),
+            json!({"error": msg, "errors": errors}),
         ));
     }
-    let feed: Value = serde_json::from_slice(&out.stdout).map_err(|e| {
+    Ok(Json(json!({"stations": stations, "errors": errors})))
+}
+
+/// The API sources (main pipeline, registered folders, pages, links) with their station counts.
+async fn apis_list(State(f): S) -> Json<Value> {
+    let (sources, reg_error) = apis::resolve(&f.config.paths.base).await;
+    Json(json!({
+        "registry": apis::registry_path(&f.config.paths.base).display().to_string(),
+        "registry_error": reg_error,
+        "sources": sources.iter().map(|r| r.summary()).collect::<Vec<_>>(),
+    }))
+}
+
+async fn apis_add(State(f): S, Json(s): Json<apis::Source>) -> Result<Json<Value>, ApiError> {
+    apis::add(&f.config.paths.base, s)
+        .map(|s| Json(json!({"added": s})))
+        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, json!({"error": e})))
+}
+
+#[derive(Deserialize)]
+struct PathBody {
+    path: String,
+}
+
+async fn apis_remove(State(f): S, Json(b): Json<PathBody>) -> Result<Json<Value>, ApiError> {
+    apis::remove(&f.config.paths.base, &b.path)
+        .map(|removed| Json(json!({"removed": removed})))
+        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, json!({"error": e})))
+}
+
+/// A registered `.html` page (Atom Builder, Reconciliation ...), served so the home page can link it.
+async fn page(State(f): S, Path(i): Path<usize>) -> Result<axum::response::Html<String>, ApiError> {
+    let reg = apis::load(&f.config.paths.base).map_err(|e| {
         ApiError(
-            StatusCode::SERVICE_UNAVAILABLE,
-            json!({"error": format!("console.py list is not JSON: {e}")}),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            json!({"error": format!("{e:#}")}),
         )
     })?;
-    Ok(Json(feed))
+    let s = reg
+        .sources
+        .get(i)
+        .filter(|s| apis::kind(&s.path) == apis::Kind::Page)
+        .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, json!({"error": "no such page"})))?;
+    std::fs::read_to_string(&s.path)
+        .map(axum::response::Html)
+        .map_err(|e| {
+            ApiError(
+                StatusCode::NOT_FOUND,
+                json!({"error": format!("{}: {e}", s.path)}),
+            )
+        })
 }
 
-fn pipeline_console(base: &std::path::Path) -> Option<std::path::PathBuf> {
-    let candidates = std::env::var_os("PIPELINE_SYSTEM")
-        .map(std::path::PathBuf::from)
-        .into_iter()
-        .chain(std::iter::once(base.to_path_buf()));
-    candidates
-        .map(|sys| sys.join("engine").join("console.py"))
-        .find(|p| p.is_file())
+/// Run a station's button (or open its folder) from the page: only a path the current station feed lists, never one
+/// the request makes up. Same as double-clicking it: `start "" <path>` in its own window.
+async fn launch(State(f): S, Json(b): Json<PathBody>) -> Result<Json<Value>, ApiError> {
+    let (sources, _) = apis::resolve(&f.config.paths.base).await;
+    let listed = sources.iter().flat_map(|r| r.stations.iter()).any(|st| {
+        st["front"].as_str() == Some(b.path.as_str())
+            || st["buttons"].as_array().is_some_and(|bs| {
+                bs.iter()
+                    .any(|x| x["path"].as_str() == Some(b.path.as_str()))
+            })
+    });
+    if !listed {
+        return Err(ApiError(
+            StatusCode::FORBIDDEN,
+            json!({"error": "not a station button or folder in the current feed"}),
+        ));
+    }
+    if !cfg!(windows) {
+        return Err(ApiError(
+            StatusCode::NOT_IMPLEMENTED,
+            json!({"error": "launching stations is Windows-only"}),
+        ));
+    }
+    std::process::Command::new("cmd")
+        .args(["/C", "start", "", &b.path])
+        .spawn()
+        .map_err(|e| {
+            ApiError(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({"error": e.to_string()}),
+            )
+        })?;
+    Ok(Json(json!({"started": b.path})))
 }
 
-fn python_command() -> (String, Vec<String>) {
-    if let Some(p) = std::env::var_os("PYTHON") {
-        return (p.to_string_lossy().into_owned(), vec![]);
-    }
-    if cfg!(windows) {
-        ("py".into(), vec!["-3".into()])
-    } else {
-        ("python3".into(), vec![])
-    }
+/// The home page: every API source and station on one page. `<base>/ui/home.html` overrides the built-in copy.
+async fn home_page(State(f): S) -> axum::response::Html<String> {
+    const BUILT_IN: &str = include_str!("../../../ui/home.html");
+    let disk = std::fs::read_to_string(f.config.paths.base.join("ui").join("home.html"));
+    axum::response::Html(disk.unwrap_or_else(|_| BUILT_IN.to_string()))
 }
 
 /// The workspace page: `<base>/ui/api-workspace.html` if present (edit without rebuilding), else the
@@ -760,6 +821,92 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn home_page_lists_every_source_on_one_feed_and_launches_only_listed_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = Forge::with_store(
+            Config::from_strings(
+                DEFAULT_PROVIDERS,
+                DEFAULT_SETTINGS,
+                dir.path().to_path_buf(),
+                None,
+            )
+            .unwrap(),
+            forge_core::Store::open_memory().unwrap(),
+        )
+        .unwrap();
+        let (st, _, _) = call(
+            app(f.clone()),
+            Request::get("/").body(Body::empty()).unwrap(),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        // A main pipeline and a folder of other stations (Atoms), both registered from the page.
+        let api = dir.path().join("API");
+        std::fs::create_dir_all(api.join("_system/engine")).unwrap();
+        std::fs::write(
+            api.join("_system/engine/console.py"),
+            "import json\nprint(json.dumps({'stations': [{'label': '101_FIS_INVENTORY', 'family': '10_FIS', 'buttons': []}]}))\n",
+        )
+        .unwrap();
+        let atoms = dir.path().join("Atoms").join("201_ATOM_BUILDER");
+        std::fs::create_dir_all(&atoms).unwrap();
+        std::fs::write(atoms.join("1 RUN HERE.bat"), "").unwrap();
+        for (path, group) in [(&api, ""), (&dir.path().join("Atoms"), "Atoms & Axioms")] {
+            let (st, body, _) = call(
+                app(f.clone()),
+                post(
+                    "/api/apis",
+                    json!({"name": "", "group": group, "path": path.display().to_string()}),
+                ),
+            )
+            .await;
+            assert_eq!(st, StatusCode::OK, "{body}");
+        }
+        let (st, bad, _) = call(
+            app(f.clone()),
+            post(
+                "/api/apis",
+                json!({"name": "x", "path": dir.path().join("nope").display().to_string()}),
+            ),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "{bad}");
+
+        let (st, list, _) = call(
+            app(f.clone()),
+            Request::get("/api/apis").body(Body::empty()).unwrap(),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(list["sources"][0]["kind"], "pipeline");
+        assert_eq!(list["sources"][0]["main"], true);
+        assert_eq!(list["sources"][1]["kind"], "folder");
+
+        let (st, feed, _) = call(
+            app(f.clone()),
+            Request::get("/api/stations").body(Body::empty()).unwrap(),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{feed}");
+        assert_eq!(feed["stations"][0]["family"], "10_FIS");
+        assert!(feed["stations"][0].get("group").is_none());
+        assert_eq!(feed["stations"][1]["group"], "Atoms & Axioms");
+        assert_eq!(feed["stations"][1]["label"], "201_ATOM_BUILDER");
+
+        // Only a path the feed lists may be launched.
+        let (st, _, _) = call(
+            app(f.clone()),
+            post(
+                "/api/launch",
+                json!({"path": "C:\\Windows\\System32\\calc.exe"}),
+            ),
+        )
+        .await;
+        assert_eq!(st, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
     async fn workspace_page_and_a_gated_run_through_http() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("templates")).unwrap();
@@ -784,7 +931,7 @@ mod tests {
         let f = Forge::with_store(cfg, forge_core::Store::open_memory().unwrap()).unwrap();
 
         let resp = app(f.clone())
-            .oneshot(Request::get("/").body(Body::empty()).unwrap())
+            .oneshot(Request::get("/workspace").body(Body::empty()).unwrap())
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);

@@ -35,12 +35,30 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --all
       - run: cargo build --release
+      - name: Package (unzip, run INSTALL.bat)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist, dist/station | Out-Null
+          Copy-Item target/release/forge.exe, target/release/forge-tray.exe, install/*, README.md -Destination dist/
+          Copy-Item station/* -Destination dist/station/ -Recurse
+      # The installer and troubleshooter as David runs them: Windows PowerShell 5.1, a pipeline folder, no questions.
+      - name: Install, troubleshoot, reinstall, uninstall
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $api = Join-Path $env:RUNNER_TEMP 'API'
+          New-Item -ItemType Directory -Force "$api\_system\engine" | Out-Null
+          Set-Content "$api\_system\engine\console.py" "import json`nprint(json.dumps({'stations': [{'label': '101_FIS_INVENTORY', 'family': '10_FIS', 'buttons': []}]}))" -Encoding ascii
+          $dest = Join-Path $env:RUNNER_TEMP 'Forge'
+          & dist\install.ps1 -Dest $dest -Pipeline $api -Quiet -NoShortcuts -NoLaunch
+          & "$dest\troubleshoot.ps1" -Quiet
+          if ($LASTEXITCODE -ne 0) { throw "troubleshoot found $LASTEXITCODE problem(s)" }
+          & dist\install.ps1 -Dest $dest -Pipeline $api -Quiet -NoShortcuts -NoLaunch
+          $n = @((Get-Content "$dest\config\apis.json" -Raw | ConvertFrom-Json).sources).Count
+          if ($n -ne 1) { throw "reinstall duplicated the pipeline: $n sources" }
+          & "$dest\uninstall.ps1" -All
+          if (Test-Path $dest) { throw "uninstall -All left $dest" }
       - uses: actions/upload-artifact@v4
         with:
           name: forge-windows-x64
-          path: |
-            target/release/forge.exe
-            target/release/forge-tray.exe
-            config/
-            templates/
-            station/
+          path: dist/

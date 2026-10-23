@@ -1,5 +1,6 @@
-//! The menu, built from forge's `GET /api/stations` (the pipeline's `console.py list`). Platform-independent and
-//! tested; the Windows tray in `main.rs` only draws it.
+//! The menu, built from forge's `GET /api/stations` (the main pipeline's `console.py list`, then every other API
+//! source registered on the home page, each under its own group). Platform-independent and tested; the Windows tray
+//! in `main.rs` only draws it.
 
 use serde_json::Value;
 
@@ -11,7 +12,8 @@ pub const FRONT: &str = "Front stations";
 #[derive(Debug, Clone, PartialEq)]
 pub struct Button {
     pub name: String,
-    /// A `.bat` the feed listed for this station: the only thing the tray ever runs.
+    /// A `.bat` (run) or `.html` (opened in the browser) the feed listed for this station: the only things the tray
+    /// ever starts.
     pub path: String,
 }
 
@@ -59,17 +61,28 @@ pub fn build(feed: &Value) -> Vec<Group> {
         if label.is_empty() || EXCLUDED.iter().any(|x| *x == label || path.ends_with(x)) {
             continue;
         }
-        let family = row["family"].as_str().unwrap_or_default().to_string();
+        // Stations of other sources carry their source's `group`; the main pipeline's are grouped by family.
+        let (family, title) = match row["group"].as_str().filter(|g| !g.is_empty()) {
+            Some(g) => (format!("~{g}"), g.to_string()),
+            None => {
+                let f = row["family"].as_str().unwrap_or_default().to_string();
+                let t = group_title(&f);
+                (f, t)
+            }
+        };
         let buttons = row["buttons"]
             .as_array()
             .map(|bs| {
                 bs.iter()
                     .filter_map(|b| {
                         let p = b["path"].as_str()?;
-                        p.to_ascii_lowercase().ends_with(".bat").then(|| Button {
-                            name: b["name"].as_str().unwrap_or(p).to_string(),
-                            path: p.to_string(),
-                        })
+                        let l = p.to_ascii_lowercase();
+                        (l.ends_with(".bat") || l.ends_with(".html") || l.ends_with(".htm")).then(
+                            || Button {
+                                name: b["name"].as_str().unwrap_or(p).to_string(),
+                                path: p.to_string(),
+                            },
+                        )
                     })
                     .collect()
             })
@@ -89,14 +102,15 @@ pub fn build(feed: &Value) -> Vec<Group> {
             None => groups.push((
                 family.clone(),
                 Group {
-                    name: group_title(&family),
+                    name: title,
                     stations: vec![station],
                 },
             )),
         }
     }
-    // Families in number order; the unnamed (front) group last.
-    groups.sort_by(|(a, _), (b, _)| (a.is_empty(), a.as_str()).cmp(&(b.is_empty(), b.as_str())));
+    // Families in number order, then the other sources' groups (`~name`), the unnamed (front) group last.
+    let rank = |f: &str| (f.is_empty(), f.starts_with('~'));
+    groups.sort_by(|(a, _), (b, _)| (rank(a), a.as_str()).cmp(&(rank(b), b.as_str())));
     for (_, g) in groups.iter_mut() {
         g.stations.sort_by(|a, b| a.label.cmp(&b.label));
     }
@@ -142,6 +156,11 @@ pub fn fetch(base: &str) -> anyhow::Result<Value> {
     Ok(json)
 }
 
+/// Is forge answering at `base`?
+pub fn alive(base: &str) -> bool {
+    matches!(http_get(base, "/health"), Ok((200, _)))
+}
+
 /// Minimal HTTP/1.1 GET for `http://host:port`. No TLS: the tray only talks to the local forge.
 fn http_get(base: &str, path: &str) -> anyhow::Result<(u16, String)> {
     use std::io::{Read, Write};
@@ -149,7 +168,11 @@ fn http_get(base: &str, path: &str) -> anyhow::Result<(u16, String)> {
         .strip_prefix("http://")
         .ok_or_else(|| anyhow::anyhow!("FORGE_URL must be http://host:port (forge is local)"))?;
     let host = rest.split('/').next().unwrap_or(rest);
-    let mut stream = std::net::TcpStream::connect(host)?;
+    let addr = std::net::ToSocketAddrs::to_socket_addrs(host)?
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("cannot resolve {host}"))?;
+    let mut stream =
+        std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(3))?;
     stream.set_read_timeout(Some(std::time::Duration::from_secs(90)))?;
     write!(stream, "GET {path} HTTP/1.1\r\nHost: {host}\r\nAccept: application/json\r\nConnection: close\r\n\r\n")?;
     let mut raw = Vec::new();
@@ -202,7 +225,9 @@ mod tests {
                          {"name": "notes", "path": "C:/API/10_FIS/101_FIS_INVENTORY/notes.txt"}]},
             {"label": "00_QUICK_CALL", "family": "", "path": "000_QUICK_CALL", "front": "C:/API/000_QUICK_CALL", "buttons": []},
             {"label": "60_OPENAI_STATIONS", "family": "", "path": "060_OPENAI_STATIONS", "front": "C:/API/060_OPENAI_STATIONS", "buttons": []},
-            {"label": "91_CHAT", "family": "09_DESK_TOOLS", "path": "09_DESK_TOOLS\\091_CHAT", "front": "C:/API/09_DESK_TOOLS/091_CHAT", "buttons": []}
+            {"label": "91_CHAT", "family": "09_DESK_TOOLS", "path": "09_DESK_TOOLS\\091_CHAT", "front": "C:/API/09_DESK_TOOLS/091_CHAT", "buttons": []},
+            {"label": "201_ATOM_BUILDER", "family": "", "group": "Atoms & Axioms", "source": "Atoms", "path": "201_ATOM_BUILDER", "front": "D:/Atoms/201_ATOM_BUILDER",
+             "buttons": [{"name": "atom-builder", "path": "D:/Atoms/201_ATOM_BUILDER/atom-builder.html"}]}
         ]})
     }
 
@@ -210,7 +235,11 @@ mod tests {
     fn groups_by_family_in_order_front_last_and_openai_hidden() {
         let g = build(&feed());
         let names: Vec<_> = g.iter().map(|g| g.name.as_str()).collect();
-        assert_eq!(names, ["09 · DESK TOOLS", "10 · FIS", FRONT]);
+        assert_eq!(
+            names,
+            ["09 · DESK TOOLS", "10 · FIS", "Atoms & Axioms", FRONT]
+        );
+        assert_eq!(g[2].stations[0].buttons[0].name, "atom-builder");
         assert_eq!(
             g[1].stations
                 .iter()

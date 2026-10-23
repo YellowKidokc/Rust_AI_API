@@ -3,6 +3,7 @@
 //!   forge mcp              MCP server on stdio, for other AIs
 //!   forge run / ask / ...  the command line
 
+mod apis;
 mod mcp;
 mod server;
 
