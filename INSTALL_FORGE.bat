@@ -1,19 +1,19 @@
 @echo off
 setlocal
 pushd "%~dp0"
-cargo build --release -p forge
-if errorlevel 1 goto failed
-if not exist "station\BACKSIDE" mkdir "station\BACKSIDE"
-copy /y "target\release\forge.exe" "station\BACKSIDE\forge.exe"
-if errorlevel 1 goto failed
-"station\BACKSIDE\forge.exe" init "%~dp0station\BACKSIDE"
-if errorlevel 1 goto failed
+cargo build --release
+if errorlevel 1 (
+  popd
+  pause
+  exit /b 1
+)
+popd
+if not defined PIPELINE_WORKFLOWS_ROOT set "PIPELINE_WORKFLOWS_ROOT=%~dp0..\pipeline-workflows"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install\install.ps1" -Dest "%~dp0station\BACKSIDE" -Pipeline "%PIPELINE_WORKFLOWS_ROOT%\API" -Quiet -NoShortcuts -NoLaunch
+if errorlevel 1 (
+  echo Installation failed. Read the error above.
+  pause
+  exit /b 1
+)
 echo Installed. Open station\4 OPEN WORKSPACE.bat
-popd
 pause
-exit /b 0
-:failed
-echo Installation failed. Read the error above.
-popd
-pause
-exit /b 1

@@ -1,6 +1,6 @@
 # Live pipeline station workspace
 
-Forge serves `ui/api-workspace.html` at `/`. The root `api-workspace_1.html`
+Forge serves API Home at `/` and `ui/api-workspace.html` at `/workspace`. The root `api-workspace_1.html`
 is the older seven-group prototype. The pipeline repo's `API/api-workspace.html`
 is a separate, larger prototype. Both are preserved.
 
@@ -12,7 +12,7 @@ but is excluded from this page. Unmapped families appear under Front stations.
 Each card shows the real station number, metadata, buttons, counts, last run,
 goals, prompt SHA-256 hashes and quick-call presets. Refresh reads the files
 again, so story prompt changes require no Rust rebuild. Catalog reads cannot
-repair or rewrite station paths. The endpoint has a 30-second timeout and
+repair or rewrite station paths. The endpoint has a 60-second timeout and
 returns HTTP 503 with a setup explanation if the pipeline or Python is missing.
 
 ## Install and open on Windows
@@ -23,9 +23,11 @@ returns HTTP 503 with a setup explanation if the pipeline or Python is missing.
    The installer builds release Forge into `station/BACKSIDE`, then initializes
    its config, job templates and HTML files without overwriting existing files.
 3. Run `station/4 OPEN WORKSPACE.bat`, then open `http://127.0.0.1:8790/`.
-4. Select Workbench to inspect the Pipeline stations catalog.
+4. API Home lists stations and opens their registered launchers. For the detailed
+   prompt catalog and Forge jobs, open `/workspace` and select Workbench.
 
-`FORGE_PYTHON` can name a Python executable, including its full path. The page
+`FORGE_PYTHON` can name a Python executable, including its full path. `PIPELINE_SYSTEM` names `API/_system` for the tray and
+API Home; installation also registers the API folder in `config/apis.json`. The page
 uses its serving origin by default; an embedding shell can set `window.FORGE_URL`.
 Do not run the separate quick-call Picker on port 8790 at the same time as Forge.
 
@@ -34,8 +36,9 @@ preserving edits, rename the installed `ui/api-workspace.html` before reinstalli
 
 ## Execution and templates
 
-The catalog is read-only. Pipeline stations still execute through their existing
-launchers/ONE_MENU, preserving multi-pass Stories gates and Python output receipts.
+The workspace catalog is read-only. API Home can launch the registered station
+buttons through `/api/launch`, preserving existing ONE_MENU behavior, multi-pass
+Stories gates and Python output receipts.
 Quick Run and the existing Workflows controls execute **Forge job templates**;
 pipeline station IDs are not converted into Forge jobs. `/workbench` also serves
 the existing editable, importable API-pack frontend.
@@ -49,6 +52,7 @@ For a plain Forge job, add `templates/<job>.md` using the existing minijinja for
 ```
 cargo test --workspace
 cargo fmt --all -- --check
+node scripts/test-station-ui.cjs ../pipeline-workflows
 ```
 
 In pipeline-workflows:

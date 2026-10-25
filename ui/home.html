@@ -102,7 +102,8 @@ function renderStations(){
     if(EXCLUDED_FROM_PAGE.some(x=>s.label===x||(s.path||'').endsWith(x)))continue;
     const hay=[s.label,s.path,s.source,s.group,s.family].join(' ').toLowerCase();
     if(q&&!hay.includes(q))continue;
-    const key=s.group?'~'+s.group:(s.family||'￿');
+    const family=stationGroups.some(g=>g[0]===s.family)?s.family:"";
+    const key=s.group?"~"+s.group:(family||"front");
     const name=s.group||(stationGroups.find(g=>g[0]===family)||['','Front stations'])[1];
     if(!groups.has(key))groups.set(key,{name,items:[]});
     groups.get(key).items.push(s);
@@ -110,7 +111,7 @@ function renderStations(){
   const keys=[...groups.keys()].sort();
   $('#stations').innerHTML=keys.length?keys.map(k=>{const g=groups.get(k);g.items.sort((a,b)=>(a.label||'').localeCompare(b.label||''));
     return `<section class="group"><h3>${esc(g.name)} <span class="muted">(${g.items.length})</span></h3><div class="grid">${g.items.map(s=>{
-      const label=(s.path||s.label||'').split(/[\\/]/).pop()||s.label;
+      const label=s.label||(s.path||'').split(/[\\/]/).pop()||'Station';
       const btns=(s.buttons||[]).filter(b=>/\.(bat|html?)$/i.test(b.path||''));
       return `<div class="card"><div class="t">${esc(label)}</div><div class="s">${esc(s.source||'')}</div><div class="b">
         ${btns.map(b=>`<button class="${/\.bat$/i.test(b.path)?'primary':''}" data-run="${esc(b.path)}">${esc(b.name)}</button>`).join('')}

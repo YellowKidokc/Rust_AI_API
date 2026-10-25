@@ -801,6 +801,10 @@ fn init(dir: PathBuf) -> Result<()> {
     .collect();
     let files = files.into_iter().chain([
         (
+            dir.join("ui/home.html"),
+            include_str!("../../../ui/home.html"),
+        ),
+        (
             dir.join("ui/api-workspace.html"),
             include_str!("../../../ui/api-workspace.html"),
         ),

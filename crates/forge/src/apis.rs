@@ -171,7 +171,7 @@ pub fn scan_folder(root: &Path) -> Vec<Value> {
 }
 
 pub fn python_command() -> (String, Vec<String>) {
-    if let Some(p) = std::env::var_os("PYTHON") {
+    if let Some(p) = std::env::var_os("FORGE_PYTHON").or_else(|| std::env::var_os("PYTHON")) {
         return (p.to_string_lossy().into_owned(), vec![]);
     }
     if cfg!(windows) {
