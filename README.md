@@ -35,6 +35,61 @@ Config lookup: `--home <dir>`, else `FORGE_HOME`, else walk up from the current 
 looking for `config\providers.json` or `_system\config\providers.json` (the API workbench's existing files work as-is),
 else built-in defaults.
 
+## Install (Windows): API Home in the taskbar
+
+1. GitHub > Actions > latest green `ci` run > download **forge-windows-x64**, unzip it anywhere.
+   (Or, with Rust installed, run `install\INSTALL.bat` straight from this repo: it builds first.)
+2. Double-click **`INSTALL.bat`** (or drag your pipeline `API` folder onto it). It installs into
+   `%LOCALAPPDATA%\Forge`, finds `D:\GitHub\pipeline-workflows\API` by itself (asks if it can't), adds
+   **API Home** to the Start menu and desktop, offers "start with Windows", and starts it.
+3. Keys stay environment variables: `setx DEEPSEEK_API_KEY "sk-..."` once (the installer says if it is missing).
+
+There is no port to set and nothing to start by hand: the tray starts forge itself (hidden) when nothing answers,
+and stops it again on Quit. In the install folder:
+
+| file | does |
+|---|---|
+| `LAUNCH.bat` | start API Home and open the home page |
+| `TROUBLESHOOT.bat` | checks programs, config, Python, every API source (`console.py list`), forge, the port, the station feed, the home page, `forge doctor`, the tray and keys; OK / WARN / FAIL with the fix under each, report saved in `LOGS\` (`-Fix` also offers fixes). Also in the tray menu |
+| `UNINSTALL.bat` | stop it, remove programs and shortcuts; config, ledger and LOGS stay (`-All` removes everything) |
+
+CI runs the same installer, troubleshooter, a reinstall and the uninstaller on Windows PowerShell 5.1 on every push.
+
+## The home page: every API on one page
+
+`http://127.0.0.1:8790/` (tray: **Open home**) lists every API source and all their stations, grouped, with a filter.
+**Add** takes a path (Shift+right-click a folder > Copy as path) plus an optional name and group:
+
+- a pipeline folder (has `_system\engine\console.py`): its stations, from its own `console.py list`
+- any other folder (API 2, Atoms, Axioms, an old copy): every folder in it (3 levels) with a `.bat` or `.html` becomes a
+  station, those files its buttons
+- an `.html` page (Atom Builder, Reconciliation ...) or an `http` link: listed under Pages & links
+
+The list lives in `config\apis.json`. The first pipeline is the main one (grouped by family: `01 · CKG` ... `10 · FIS`);
+every other source gets its own group, e.g. "Atoms & Axioms". A button runs exactly the file the feed lists, in its own
+window (`POST /api/launch` refuses any other path). Removing a source only takes it off the list. Kimi's workspace page
+moved to `/workspace`. `<home>\ui\home.html` overrides the built-in page.
+
+## Taskbar menu: `forge-tray`
+
+`forge-tray.exe` puts the same list in the Windows taskbar. Its menu is built from forge's `GET /api/stations` (the
+main pipeline's `_system\engine\console.py list`, then every other source on the home page):
+
+```
+Open home                           every API on one page
+Open workspace                      Kimi's page
+01 · CKG  >  020_CKG  >  1 RUN HERE / 2 RUN ON FOLDER / Open folder
+...
+10 · FIS  >  101_FIS_INVENTORY  >  1 RUN HERE / 2 RUN ON FOLDER / Open folder
+Atoms & Axioms  >  ...              (other sources, by group)
+Front stations  >  000_QUICK_CALL ...
+Troubleshoot · Refresh · Quit
+```
+
+A click runs exactly that station's `.bat` in its own console (an `.html` opens in the browser), the same as
+double-clicking it. The OpenAI stations are left out. `FORGE_URL` points the tray at another address;
+`forge-tray --print` prints the menu as text.
+
 ## Routes: DeepSeek by default, free when you ask
 
 A route is an ordered ladder in `config/settings.json`. forge tries each rung in order and moves down on a 429, 5xx,
@@ -146,7 +201,7 @@ applies. `forge runs grid [id]` prints the per-paper status grid. Every stage re
 stage outputs don't feed the next stage yet.
 
 **The workspace page.** `forge serve` serves `ui/api-workspace.html` (Kimi's design) at
-`http://127.0.0.1:8790/`, live-wired: Dashboard = `GET /api/grid` (rows by uid, columns by job),
+`http://127.0.0.1:8790/workspace`, live-wired: Dashboard = `GET /api/grid` (rows by uid, columns by job),
 Quick Run / Workflows start runs (`POST /api/runs`) and drive the gate, Pause, Resume and Stop
 (`POST /api/runs/{id}/{approve|pause|resume|cancel}`). Click a paper for its history (`GET /api/uid/{uid}`).
 Opened as a plain file, it's still the sample prototype. A copy at `<home>/ui/api-workspace.html` overrides
@@ -216,6 +271,8 @@ clipsync-cloudflare-app/   the React clipboard / research front end (Cloudflare 
 config/             default providers.json, settings.json (compiled in as fallbacks)
 templates/          default job templates (compiled in as fallbacks)
 station/            .bat launchers and station layout
+install/            INSTALL / LAUNCH / TROUBLESHOOT / UNINSTALL (.bat + .ps1)
+ui/                 home.html (every API), api-workspace.html (Kimi's workspace), workbench.html
 docs/               semtag-build-prompt.md (the tagger spec that builds on this core)
 ```
 

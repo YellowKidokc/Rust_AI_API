@@ -7,7 +7,9 @@
 //!   `POST /candidate`
 //! * humans and other agents: `GET /route/plan`, `GET /ledger/recent`, `GET /ledger/stats`,
 //!   `GET /context/search`
-//! * the API workspace page at `/`, backed by `GET /api/grid` (rows by permanent uid, columns by job),
+//! * the home page at `/` (every API source and station: `GET /api/stations`, `GET|POST /api/apis`,
+//!   `POST /api/apis/remove`, `POST /api/launch`, `/pages/{i}`; see `apis.rs`)
+//! * the API workspace page at `/workspace`, backed by `GET /api/grid` (rows by permanent uid, columns by job),
 //!   `GET|POST /api/runs`, `POST /api/runs/{id}/{approve|pause|resume|cancel}`, `GET /api/uid/...`,
 //!   `GET /api/focus`
 //!
@@ -26,6 +28,8 @@ use forge_core::canon::{self, CandidateInput, CanonError};
 use forge_core::router::{RouteFailure, Routed};
 use forge_core::runs;
 use forge_core::{Forge, Message, RouteRequest};
+
+use crate::apis;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tower_http::cors::{AllowOrigin, CorsLayer};
@@ -58,7 +62,8 @@ pub fn app(forge: Arc<Forge>) -> Http {
         .route("/ledger/recent", get(ledger_recent))
         .route("/ledger/stats", get(ledger_stats))
         .route("/context/search", get(context_search))
-        .route("/", get(workspace_page))
+        .route("/", get(home_page))
+        .route("/home", get(home_page))
         .route("/workspace", get(workspace_page))
         .route("/api/grid", get(grid))
         .route("/api/runs", get(runs_list).post(runs_start))
@@ -68,8 +73,12 @@ pub fn app(forge: Arc<Forge>) -> Http {
         .route("/api/uid/{uid}", get(uid_show))
         .route("/api/focus", get(focus))
         .route("/api/templates", get(templates))
-        .route("/api/stations", get(station_feed))
         .route("/workbench", get(pack_workbench))
+        .route("/api/stations", get(stations))
+        .route("/api/apis", get(apis_list).post(apis_add))
+        .route("/api/apis/remove", post(apis_remove))
+        .route("/api/launch", post(launch))
+        .route("/pages/{i}", get(page))
         .layer(cors)
         .with_state(forge)
 }
@@ -345,63 +354,162 @@ async fn plan(State(f): S, Query(q): Query<SearchQ>) -> Result<Json<Value>, ApiE
     ))
 }
 
+/// Every station of every API source (`apis.rs`): the main pipeline's `console.py list` rows unchanged, then the other
+/// registered sources' stations, each tagged with `source` and `group`. A clear 503 when nothing can be read: the page
+/// and the tray never fall back to a typed list. Errors of single sources are listed next to the stations.
+async fn stations(State(f): S) -> Result<Json<Value>, ApiError> {
+    let (sources, reg_error) = apis::resolve(&f.config.paths.base).await;
+    let stations: Vec<Value> = sources.iter().flat_map(|r| r.stations.clone()).collect();
+    let mut errors: Vec<Value> = sources
+        .iter()
+        .filter_map(|r| {
+            r.error
+                .as_ref()
+                .map(|e| json!({"source": r.source.name, "error": e}))
+        })
+        .collect();
+    if let Some(e) = reg_error {
+        errors.push(json!({"source": "config/apis.json", "error": e}));
+    }
+    if stations.is_empty() {
+        let msg = errors
+            .first()
+            .and_then(|e| e["error"].as_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                "pipeline not found: add your API folder on the home page (or set PIPELINE_SYSTEM to API\\_system)"
+                    .into()
+            });
+        return Err(ApiError(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({"error": msg, "errors": errors}),
+        ));
+    }
+    let mut workspace = json!({"EXCLUDED_FROM_PAGE": [], "groups": [["", "Front stations"]]});
+    if let Some(source) = sources.iter().find(|s| s.main) {
+        if let Some(console) = apis::pipeline_console(std::path::Path::new(&source.source.path)) {
+            let policy = console
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join("config/workspace.json");
+            match std::fs::read_to_string(&policy)
+                .map_err(|e| e.to_string())
+                .and_then(|s| serde_json::from_str::<Value>(&s).map_err(|e| e.to_string()))
+            {
+                Ok(value) => workspace = value,
+                Err(e) => errors.push(json!({"source": policy.display().to_string(), "error": e})),
+            }
+        }
+    }
+    Ok(Json(
+        json!({"stations": stations, "errors": errors, "workspace": workspace}),
+    ))
+}
+
+/// The API sources (main pipeline, registered folders, pages, links) with their station counts.
+async fn apis_list(State(f): S) -> Json<Value> {
+    let (sources, reg_error) = apis::resolve(&f.config.paths.base).await;
+    Json(json!({
+        "registry": apis::registry_path(&f.config.paths.base).display().to_string(),
+        "registry_error": reg_error,
+        "sources": sources.iter().map(|r| r.summary()).collect::<Vec<_>>(),
+    }))
+}
+
+async fn apis_add(State(f): S, Json(s): Json<apis::Source>) -> Result<Json<Value>, ApiError> {
+    apis::add(&f.config.paths.base, s)
+        .map(|s| Json(json!({"added": s})))
+        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, json!({"error": e})))
+}
+
+#[derive(Deserialize)]
+struct PathBody {
+    path: String,
+}
+
+async fn apis_remove(State(f): S, Json(b): Json<PathBody>) -> Result<Json<Value>, ApiError> {
+    apis::remove(&f.config.paths.base, &b.path)
+        .map(|removed| Json(json!({"removed": removed})))
+        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, json!({"error": e})))
+}
+
+/// A registered `.html` page (Atom Builder, Reconciliation ...), served so the home page can link it.
+async fn page(State(f): S, Path(i): Path<usize>) -> Result<axum::response::Html<String>, ApiError> {
+    let reg = apis::load(&f.config.paths.base).map_err(|e| {
+        ApiError(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            json!({"error": format!("{e:#}")}),
+        )
+    })?;
+    let s = reg
+        .sources
+        .get(i)
+        .filter(|s| apis::kind(&s.path) == apis::Kind::Page)
+        .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, json!({"error": "no such page"})))?;
+    std::fs::read_to_string(&s.path)
+        .map(axum::response::Html)
+        .map_err(|e| {
+            ApiError(
+                StatusCode::NOT_FOUND,
+                json!({"error": format!("{}: {e}", s.path)}),
+            )
+        })
+}
+
+/// Run a station's button (or open its folder) from the page: only a path the current station feed lists, never one
+/// the request makes up. Same as double-clicking it: `start "" <path>` in its own window.
+async fn launch(State(f): S, Json(b): Json<PathBody>) -> Result<Json<Value>, ApiError> {
+    let (sources, _) = apis::resolve(&f.config.paths.base).await;
+    let listed = sources.iter().flat_map(|r| r.stations.iter()).any(|st| {
+        st["front"].as_str() == Some(b.path.as_str())
+            || st["buttons"].as_array().is_some_and(|bs| {
+                bs.iter()
+                    .any(|x| x["path"].as_str() == Some(b.path.as_str()))
+            })
+    });
+    if !listed {
+        return Err(ApiError(
+            StatusCode::FORBIDDEN,
+            json!({"error": "not a station button or folder in the current feed"}),
+        ));
+    }
+    if !cfg!(windows) {
+        return Err(ApiError(
+            StatusCode::NOT_IMPLEMENTED,
+            json!({"error": "launching stations is Windows-only"}),
+        ));
+    }
+    std::process::Command::new("cmd")
+        .args(["/C", "start", "", &b.path])
+        .spawn()
+        .map_err(|e| {
+            ApiError(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({"error": e.to_string()}),
+            )
+        })?;
+    Ok(Json(json!({"started": b.path})))
+}
+
+/// The home page: every API source and station on one page. `<base>/ui/home.html` overrides the built-in copy.
+async fn home_page(State(f): S) -> axum::response::Html<String> {
+    const BUILT_IN: &str = include_str!("../../../ui/home.html");
+    let disk = std::fs::read_to_string(f.config.paths.base.join("ui").join("home.html"));
+    axum::response::Html(disk.unwrap_or_else(|_| BUILT_IN.to_string()))
+}
+
+async fn pack_workbench() -> axum::response::Html<&'static str> {
+    axum::response::Html(include_str!("../../../ui/workbench.html"))
+}
+
 /// The workspace page: `<base>/ui/api-workspace.html` if present (edit without rebuilding), else the
 /// copy built into the binary.
 async fn workspace_page(State(f): S) -> axum::response::Html<String> {
     const BUILT_IN: &str = include_str!("../../../ui/api-workspace.html");
     let disk = std::fs::read_to_string(f.config.paths.base.join("ui").join("api-workspace.html"));
     axum::response::Html(disk.unwrap_or_else(|_| BUILT_IN.to_string()))
-}
-
-/// Reuse the pipeline console; never execute a station or duplicate its discovery rules.
-async fn station_feed(State(f): S) -> Result<Json<Value>, ApiError> {
-    let root = std::env::var_os("PIPELINE_WORKFLOWS_ROOT")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            f.config
-                .paths
-                .base
-                .parent()
-                .unwrap_or(&f.config.paths.base)
-                .join("pipeline-workflows")
-        });
-    read_station_feed(&root).await.map(Json).map_err(|e| ApiError(
-        StatusCode::SERVICE_UNAVAILABLE, json!({"error": format!("Station feed unavailable: {e}. Set PIPELINE_WORKFLOWS_ROOT to the pipeline-workflows repo and FORGE_PYTHON to Python if needed.")})))
-}
-
-async fn read_station_feed(root: &std::path::Path) -> anyhow::Result<Value> {
-    let script = root.join("API/_system/engine/console.py");
-    anyhow::ensure!(script.is_file(), "{} is missing", script.display());
-    let policy: Value = serde_json::from_str(&std::fs::read_to_string(
-        root.join("API/_system/config/workspace.json"),
-    )?)?;
-    let python = std::env::var_os("FORGE_PYTHON").unwrap_or_else(|| "python".into());
-    let mut command = tokio::process::Command::new(python);
-    command
-        .arg(&script)
-        .arg("list")
-        .current_dir(root)
-        .kill_on_drop(true);
-    #[cfg(windows)]
-    command.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    let output =
-        tokio::time::timeout(std::time::Duration::from_secs(30), command.output()).await??;
-    anyhow::ensure!(
-        output.status.success(),
-        "console.py failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let mut feed: Value = serde_json::from_slice(&output.stdout)?;
-    anyhow::ensure!(
-        feed["stations"].is_array(),
-        "console returned no station array"
-    );
-    feed["workspace"] = policy;
-    Ok(feed)
-}
-
-async fn pack_workbench() -> axum::response::Html<&'static str> {
-    axum::response::Html(include_str!("../../../ui/workbench.html"))
 }
 
 #[derive(Deserialize)]
@@ -698,31 +806,129 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn missing_pipeline_is_an_explicit_error() {
+    async fn stations_feed_is_the_pipeline_console_and_never_a_typed_list() {
         let dir = tempfile::tempdir().unwrap();
-        let error = read_station_feed(dir.path()).await.unwrap_err();
-        assert!(error.to_string().contains("console.py"));
+        let cfg = |base: std::path::PathBuf| {
+            Config::from_strings(DEFAULT_PROVIDERS, DEFAULT_SETTINGS, base, None).unwrap()
+        };
+        // No pipeline here: a clear 503, not an empty or built-in list.
+        let f = Forge::with_store(
+            cfg(dir.path().to_path_buf()),
+            forge_core::Store::open_memory().unwrap(),
+        )
+        .unwrap();
+        let resp = app(f)
+            .oneshot(Request::get("/api/stations").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        // A pipeline _system whose console.py prints the feed: forge passes it through unchanged.
+        std::fs::create_dir_all(dir.path().join("engine")).unwrap();
+        std::fs::write(
+            dir.path().join("engine/console.py"),
+            "import json\nprint(json.dumps({'stations': [{'number': '101', 'label': '101_FIS_INVENTORY', 'family': '10_FIS'}]}))\n",
+        )
+        .unwrap();
+        let f = Forge::with_store(
+            cfg(dir.path().to_path_buf()),
+            forge_core::Store::open_memory().unwrap(),
+        )
+        .unwrap();
+        let resp = app(f)
+            .oneshot(Request::get("/api/stations").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&resp.into_body().collect().await.unwrap().to_bytes()).unwrap();
+        assert_eq!(body["stations"][0]["family"], "10_FIS");
     }
 
     #[tokio::test]
-    async fn station_feed_uses_console_output_and_shared_policy() {
+    async fn home_page_lists_every_source_on_one_feed_and_launches_only_listed_paths() {
         let dir = tempfile::tempdir().unwrap();
-        let system = dir.path().join("API/_system");
-        std::fs::create_dir_all(system.join("engine")).unwrap();
-        std::fs::create_dir_all(system.join("config")).unwrap();
-        std::fs::write(
-            system.join("engine/console.py"),
-            "import json\nprint(json.dumps({'stations': [{'label': '41_STORY'}]}))",
+        let f = Forge::with_store(
+            Config::from_strings(
+                DEFAULT_PROVIDERS,
+                DEFAULT_SETTINGS,
+                dir.path().to_path_buf(),
+                None,
+            )
+            .unwrap(),
+            forge_core::Store::open_memory().unwrap(),
         )
         .unwrap();
+        let (st, _, _) = call(
+            app(f.clone()),
+            Request::get("/").body(Body::empty()).unwrap(),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        // A main pipeline and a folder of other stations (Atoms), both registered from the page.
+        let api = dir.path().join("API");
+        std::fs::create_dir_all(api.join("_system/engine")).unwrap();
         std::fs::write(
-            system.join("config/workspace.json"),
-            r#"{"EXCLUDED_FROM_PAGE":[],"groups":[["","Front stations"]]}"#,
+            api.join("_system/engine/console.py"),
+            "import json\nprint(json.dumps({'stations': [{'label': '101_FIS_INVENTORY', 'family': '10_FIS', 'buttons': []}]}))\n",
         )
         .unwrap();
-        let feed = read_station_feed(dir.path()).await.unwrap();
-        assert_eq!(feed["stations"][0]["label"], "41_STORY");
-        assert_eq!(feed["workspace"]["groups"][0][1], "Front stations");
+        let atoms = dir.path().join("Atoms").join("201_ATOM_BUILDER");
+        std::fs::create_dir_all(&atoms).unwrap();
+        std::fs::write(atoms.join("1 RUN HERE.bat"), "").unwrap();
+        for (path, group) in [(&api, ""), (&dir.path().join("Atoms"), "Atoms & Axioms")] {
+            let (st, body, _) = call(
+                app(f.clone()),
+                post(
+                    "/api/apis",
+                    json!({"name": "", "group": group, "path": path.display().to_string()}),
+                ),
+            )
+            .await;
+            assert_eq!(st, StatusCode::OK, "{body}");
+        }
+        let (st, bad, _) = call(
+            app(f.clone()),
+            post(
+                "/api/apis",
+                json!({"name": "x", "path": dir.path().join("nope").display().to_string()}),
+            ),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "{bad}");
+
+        let (st, list, _) = call(
+            app(f.clone()),
+            Request::get("/api/apis").body(Body::empty()).unwrap(),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(list["sources"][0]["kind"], "pipeline");
+        assert_eq!(list["sources"][0]["main"], true);
+        assert_eq!(list["sources"][1]["kind"], "folder");
+
+        let (st, feed, _) = call(
+            app(f.clone()),
+            Request::get("/api/stations").body(Body::empty()).unwrap(),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{feed}");
+        assert_eq!(feed["stations"][0]["family"], "10_FIS");
+        assert!(feed["stations"][0].get("group").is_none());
+        assert_eq!(feed["stations"][1]["group"], "Atoms & Axioms");
+        assert_eq!(feed["stations"][1]["label"], "201_ATOM_BUILDER");
+
+        // Only a path the feed lists may be launched.
+        let (st, _, _) = call(
+            app(f.clone()),
+            post(
+                "/api/launch",
+                json!({"path": "C:\\Windows\\System32\\calc.exe"}),
+            ),
+        )
+        .await;
+        assert_eq!(st, StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]
@@ -750,7 +956,7 @@ mod tests {
         let f = Forge::with_store(cfg, forge_core::Store::open_memory().unwrap()).unwrap();
 
         let resp = app(f.clone())
-            .oneshot(Request::get("/").body(Body::empty()).unwrap())
+            .oneshot(Request::get("/workspace").body(Body::empty()).unwrap())
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);

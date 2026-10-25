@@ -1,0 +1,18 @@
+[package]
+name = "forge-tray"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Taskbar menu for the pipeline: every group and station from forge's /api/stations; a click runs that station's own .bat."
+
+[[bin]]
+name = "forge-tray"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+tray-icon = "0.26"
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }

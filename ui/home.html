@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API Home</title>
+<style>
+:root{--bg:#f6f7f9;--panel:#fff;--ink:#1b1f24;--muted:#5d6672;--line:#dde1e6;--accent:#2457c5;--accent-ink:#fff;--warn:#a4401b;--warn-bg:#fdf0ea;--chip:#eef1f5}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#121417;--panel:#1b1e23;--ink:#e6e8eb;--muted:#9aa3ae;--line:#2c3138;--accent:#6d9bff;--accent-ink:#0d1117;--warn:#ff9a6e;--warn-bg:#2b1d17;--chip:#23272e}}
+:root[data-theme="dark"]{--bg:#121417;--panel:#1b1e23;--ink:#e6e8eb;--muted:#9aa3ae;--line:#2c3138;--accent:#6d9bff;--accent-ink:#0d1117;--warn:#ff9a6e;--warn-bg:#2b1d17;--chip:#23272e}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:14px 16px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:2}
+h1{font-size:18px;margin:0 8px 0 0}
+main{max-width:1200px;margin:0 auto;padding:16px}
+a{color:var(--accent)}
+button,input{font:inherit;color:inherit}
+button{border:1px solid var(--line);background:var(--panel);border-radius:6px;padding:5px 10px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+input{border:1px solid var(--line);background:var(--bg);border-radius:6px;padding:6px 8px;min-width:0}
+.grow{flex:1}
+.muted{color:var(--muted)}
+code{overflow-wrap:anywhere}
+section{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:16px}
+h2{font-size:15px;margin:0 0 10px}
+.sources{display:flex;flex-wrap:wrap;gap:8px}
+.src{background:var(--chip);border-radius:8px;padding:8px 10px;display:flex;gap:10px;align-items:center;max-width:100%}
+.src b{white-space:nowrap}
+.src small{color:var(--muted);overflow-wrap:anywhere}
+.src.bad{background:var(--warn-bg);color:var(--warn)}
+.add{display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:8px;margin-top:12px}
+@media (max-width:700px){.add{grid-template-columns:1fr}}
+.group{margin-bottom:18px}
+.group h3{font-size:14px;margin:0 0 8px;padding-bottom:4px;border-bottom:1px solid var(--line)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px}
+.card{border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--bg)}
+.card .t{font-weight:600;overflow-wrap:anywhere}
+.card .s{color:var(--muted);font-size:12px;margin-bottom:8px}
+.card .b{display:flex;flex-wrap:wrap;gap:6px}
+.msg{padding:10px 12px;border-radius:8px;background:var(--warn-bg);color:var(--warn);margin-bottom:12px;overflow-wrap:anywhere}
+#toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:8px;opacity:0;transition:opacity .2s;max-width:calc(100% - 32px)}
+#toast.on{opacity:1}
+</style>
+</head>
+<body>
+<header>
+  <h1>API Home</h1>
+  <input id="q" class="grow" placeholder="Filter stations…" aria-label="Filter stations">
+  <a href="/workspace">Workspace</a>
+  <button id="refresh">Refresh</button>
+</header>
+<main>
+  <div id="offline" class="msg" hidden>This page needs forge. Start it from the taskbar menu (forge-tray) or run <code>LAUNCH.bat</code>, then open <a href="http://127.0.0.1:8790/">http://127.0.0.1:8790/</a>.</div>
+  <section>
+    <h2>API sources</h2>
+    <div id="sources" class="sources"><span class="muted">Loading…</span></div>
+    <form id="add" class="add">
+      <input id="path" placeholder="Folder, .html page or http link (paste the path: Shift+right-click → Copy as path)" required>
+      <input id="name" placeholder="Name (optional)">
+      <input id="group" placeholder="Group, e.g. Atoms &amp; Axioms">
+      <button class="primary" type="submit">Add</button>
+    </form>
+    <p class="muted" style="margin:8px 0 0">A pipeline folder (with <code>_system\engine\console.py</code>) brings its own stations. Any other folder: every folder in it with a <code>.bat</code> or <code>.html</code> becomes a station, those files its buttons. Saved in <code id="reg">config\apis.json</code>.</p>
+  </section>
+  <div id="errors"></div>
+  <section>
+    <h2>Pages &amp; links</h2>
+    <div id="pages" class="sources"><span class="muted">None yet: add an .html page (Atom Builder, Reconciliation …) or a link above.</span></div>
+  </section>
+  <div id="stations"></div>
+</main>
+<div id="toast" role="status"></div>
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const toast=t=>{const e=$('#toast');e.textContent=t;e.classList.add('on');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('on'),3500)};
+const api=(p,o)=>fetch(p,o).then(async r=>{const j=await r.json().catch(()=>({}));if(!r.ok)throw Object.assign(new Error(j.error||r.statusText),{body:j});return j});
+const post=(p,b)=>api(p,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b)});
+let EXCLUDED_FROM_PAGE=[];
+let stationGroups=[];
+// `10_FIS` -> `10 · FIS`, `_system` -> `System`, '' -> `Front stations` (same as the tray)
+const title=f=>{if(!f)return'Front stations';const i=f.indexOf('_');if(i<0)return f;if(i===0){const r=f.slice(1);return r[0].toUpperCase()+r.slice(1)}return f.slice(0,i)+' · '+f.slice(i+1).replace(/_/g,' ')};
+let all=[];
+
+function renderSources(d){
+  $('#reg').textContent=d.registry;
+  const run=d.sources.filter(s=>s.kind==='pipeline'||s.kind==='folder'||s.kind==='missing');
+  $('#sources').innerHTML=run.length?run.map(s=>`<div class="src ${s.error?'bad':''}">
+      <div><b>${esc(s.name)}</b> <span class="muted">${esc(s.kind)}${s.main?' · main':''} · ${s.stations} stations${s.group&&s.group!==s.name?' · '+esc(s.group):''}</span><br><small>${esc(s.path)}</small>${s.error?`<br><small>${esc(s.error)}</small>`:''}</div>
+      ${s.registered?`<button data-rm="${esc(s.path)}" title="Remove from the list (nothing on disk changes)">Remove</button>`:''}</div>`).join('')
+    :'<span class="muted">No API folders yet. Add your pipeline <code>API</code> folder below.</span>';
+  const pages=d.sources.filter(s=>s.kind==='page'||s.kind==='link');
+  if(pages.length)$('#pages').innerHTML=pages.map(s=>`<div class="src"><div><a href="${esc(s.url)}" target="_blank" rel="noopener"><b>${esc(s.name)}</b></a> <span class="muted">${esc(s.group||s.kind)}</span><br><small>${esc(s.path)}</small></div><button data-rm="${esc(s.path)}">Remove</button></div>`).join('');
+  else $('#pages').innerHTML='<span class="muted">None yet: add an .html page (Atom Builder, Reconciliation …) or a link above.</span>';
+}
+
+function renderStations(){
+  const q=$('#q').value.trim().toLowerCase();
+  const groups=new Map();
+  for(const s of all){
+    if(EXCLUDED_FROM_PAGE.some(x=>s.label===x||(s.path||'').endsWith(x)))continue;
+    const hay=[s.label,s.path,s.source,s.group,s.family].join(' ').toLowerCase();
+    if(q&&!hay.includes(q))continue;
+    const key=s.group?'~'+s.group:(s.family||'￿');
+    const name=s.group||(stationGroups.find(g=>g[0]===family)||['','Front stations'])[1];
+    if(!groups.has(key))groups.set(key,{name,items:[]});
+    groups.get(key).items.push(s);
+  }
+  const keys=[...groups.keys()].sort();
+  $('#stations').innerHTML=keys.length?keys.map(k=>{const g=groups.get(k);g.items.sort((a,b)=>(a.label||'').localeCompare(b.label||''));
+    return `<section class="group"><h3>${esc(g.name)} <span class="muted">(${g.items.length})</span></h3><div class="grid">${g.items.map(s=>{
+      const label=(s.path||s.label||'').split(/[\\/]/).pop()||s.label;
+      const btns=(s.buttons||[]).filter(b=>/\.(bat|html?)$/i.test(b.path||''));
+      return `<div class="card"><div class="t">${esc(label)}</div><div class="s">${esc(s.source||'')}</div><div class="b">
+        ${btns.map(b=>`<button class="${/\.bat$/i.test(b.path)?'primary':''}" data-run="${esc(b.path)}">${esc(b.name)}</button>`).join('')}
+        ${s.front?`<button data-run="${esc(s.front)}">Open folder</button>`:''}</div></div>`}).join('')}</div></section>`}).join('')
+    :`<section><span class="muted">${all.length?'No station matches the filter.':'No stations yet.'}</span></section>`;
+}
+
+async function load(){
+  if(location.protocol==='file:'){$('#offline').hidden=false;$('#sources').innerHTML='';return}
+  try{renderSources(await api('/api/apis'))}catch(e){$('#offline').hidden=false;return}
+  try{const d=await api('/api/stations');all=d.stations||[];EXCLUDED_FROM_PAGE=d.workspace.EXCLUDED_FROM_PAGE;stationGroups=d.workspace.groups;
+    $('#errors').innerHTML=(d.errors||[]).map(e=>`<div class="msg"><b>${esc(e.source)}</b>: ${esc(e.error)}</div>`).join('')}
+  catch(e){all=[];$('#errors').innerHTML=`<div class="msg">${esc(e.message)}</div>`}
+  renderStations();
+}
+
+document.addEventListener('click',async e=>{
+  const run=e.target.closest('[data-run]'),rm=e.target.closest('[data-rm]');
+  if(run){try{await post('/api/launch',{path:run.dataset.run});toast('Started: '+run.dataset.run.split(/[\\/]/).pop())}catch(x){toast(x.message)}}
+  if(rm&&confirm('Remove this source from the list? Nothing on disk changes.')){try{await post('/api/apis/remove',{path:rm.dataset.rm});load()}catch(x){toast(x.message)}}
+});
+$('#add').addEventListener('submit',async e=>{e.preventDefault();
+  try{const r=await post('/api/apis',{path:$('#path').value,name:$('#name').value,group:$('#group').value});
+    toast('Added: '+r.added.name);$('#path').value=$('#name').value='';load()}catch(x){toast(x.message)}});
+$('#q').addEventListener('input',renderStations);
+$('#refresh').addEventListener('click',load);
+load();
+</script>
+</body>
+</html>
