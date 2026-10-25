@@ -85,6 +85,11 @@ main{padding:28px 32px 0;max-width:1600px;width:100%;margin:auto;align-self:star
 
 <!-- ============================================================= WORKBENCH -->
 <section id="workbench-page" hidden>
+  <div class="panel" id="station-catalog">
+    <div class="panel-head"><div><h2>Pipeline stations</h2><p id="station-status" role="status">Loading live station catalog...</p></div><button id="refresh-stations">Refresh stations</button></div>
+    <p>Station buttons below show the existing folder launchers. Use those launchers to run pipeline stations. Quick Run runs Forge job templates.</p>
+    <div id="station-groups"></div>
+  </div>
   <div class="heading"><h1 id="workbench-title">Workbench</h1><button id="wb-back">← Back to dashboard</button></div>
   <p>Configure API groups, build workflows, design assemblies, and review HTML.</p>
 
@@ -284,7 +289,8 @@ page('dashboard');
    approval gate, pause, resume, and cancel. */
 (function(){
   if(!location.protocol.startsWith('http'))return;
-  const api=(path,opt)=>fetch(path,opt).then(async r=>{const j=await r.json().catch(()=>({}));if(!r.ok)throw Object.assign(new Error(j.error||r.statusText),{status:r.status,body:j});return j});
+  const FORGE_URL=(window.FORGE_URL || location.origin || 'http://127.0.0.1:8790').replace(/\/$/,'');
+  const api=(path,opt)=>fetch(FORGE_URL+path,opt).then(async r=>{const j=await r.json().catch(()=>({}));if(!r.ok)throw Object.assign(new Error(j.error||r.statusText),{status:r.status,body:j});return j});
   const post=(path,body)=>api(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body||{})});
   const MAP={ok:'done',skipped:'done',running:'running',pending:'queued',failed:'failed',blocked:'failed',awaiting_approval:'review'};
   let runId=null,runStatus=null;
@@ -301,9 +307,45 @@ page('dashboard');
   acts.insertAdjacentHTML('beforeend','<button id="qr-approve" class="primary">✓ Approve and continue</button><button id="qr-resume">▶ Resume</button>');
   try{$('#qr-source').value=localStorage.getItem('forge.source')||''}catch(e){}
 
+  async function loadStations(){
+    const status=$('#station-status'), host=$('#station-groups');
+    status.textContent='Loading live station catalog...';host.replaceChildren();
+    try{
+      const feed=await api('/api/stations');
+      const {EXCLUDED_FROM_PAGE,groups:stationGroups}=feed.workspace;
+      const visible=feed.stations.filter(s=>!EXCLUDED_FROM_PAGE.includes(s.label));
+      const known=new Set(stationGroups.map(g=>g[0]));
+      for(const [family,title] of stationGroups){
+        const members=visible.filter(s=>(known.has(s.family)?s.family:'')===family);
+        if(!members.length)continue;
+        const section=document.createElement('section'), heading=document.createElement('h3');
+        heading.textContent=title+' ('+members.length+')'; section.append(heading);
+        for(const station of members){
+          const card=document.createElement('details'), summary=document.createElement('summary');
+          card.style='padding:12px;border-bottom:1px solid var(--line)';
+          summary.textContent=station.number+' ? '+station.label+' ? '+(station.kind||'unknown')+' ? '+(station.uses_api?'API':'local')+' ? IN '+(station.inbox??'?')+' / OUT '+(station.outbox??'?');
+          card.append(summary);
+          for(const text of [station.error,station.description,'Folder: '+station.front,'Last run: '+(station.last_run||'none recorded'),'Buttons: '+(station.buttons||[]).map(b=>b.name).join(', ')]){
+            if(!text)continue;const p=document.createElement('p');p.textContent=text;card.append(p);
+          }
+          for(const goal of station.goals||[]){const p=document.createElement('p');p.textContent=goal.id+' ? '+goal.title+' ? '+goal.asks;card.append(p)}
+          for(const call of station.quick_calls||[]){const p=document.createElement("p");p.textContent=call.name+" ? SHA-256 "+call.sha256;card.append(p)}
+          for(const prompt of station.prompts||[]){const p=document.createElement('p');p.textContent=prompt.file+' ? SHA-256 '+prompt.sha256;card.append(p)}
+          section.append(card);
+        }
+        host.append(section);
+      }
+      const errors=visible.filter(s=>s.error).length;
+      status.textContent=visible.length+' visible / '+feed.stations.length+' registered ? '+errors+' errors ? '+feed.root;
+    }catch(e){status.textContent=e.message;}
+  }
+  $('#refresh-stations').onclick=loadStations;
+  loadStations();
+
   async function loadTemplates(){
     const {templates}=await api('/api/templates');
     const sel=$('#qr-pass');sel.replaceChildren(...templates.map(t=>Object.assign(document.createElement('option'),{value:t,textContent:t})));
+    // Keep the catalog independent of executable Forge job templates.
     groups.splice(0,groups.length,...templates.map(t=>[t,t]));
     assemblies.splice(0,assemblies.length);
     sequence.splice(0,sequence.length,...templates.slice(0,3));

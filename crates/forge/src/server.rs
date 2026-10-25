@@ -68,6 +68,8 @@ pub fn app(forge: Arc<Forge>) -> Http {
         .route("/api/uid/{uid}", get(uid_show))
         .route("/api/focus", get(focus))
         .route("/api/templates", get(templates))
+        .route("/api/stations", get(station_feed))
+        .route("/workbench", get(pack_workbench))
         .layer(cors)
         .with_state(forge)
 }
@@ -349,6 +351,57 @@ async fn workspace_page(State(f): S) -> axum::response::Html<String> {
     const BUILT_IN: &str = include_str!("../../../ui/api-workspace.html");
     let disk = std::fs::read_to_string(f.config.paths.base.join("ui").join("api-workspace.html"));
     axum::response::Html(disk.unwrap_or_else(|_| BUILT_IN.to_string()))
+}
+
+/// Reuse the pipeline console; never execute a station or duplicate its discovery rules.
+async fn station_feed(State(f): S) -> Result<Json<Value>, ApiError> {
+    let root = std::env::var_os("PIPELINE_WORKFLOWS_ROOT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            f.config
+                .paths
+                .base
+                .parent()
+                .unwrap_or(&f.config.paths.base)
+                .join("pipeline-workflows")
+        });
+    read_station_feed(&root).await.map(Json).map_err(|e| ApiError(
+        StatusCode::SERVICE_UNAVAILABLE, json!({"error": format!("Station feed unavailable: {e}. Set PIPELINE_WORKFLOWS_ROOT to the pipeline-workflows repo and FORGE_PYTHON to Python if needed.")})))
+}
+
+async fn read_station_feed(root: &std::path::Path) -> anyhow::Result<Value> {
+    let script = root.join("API/_system/engine/console.py");
+    anyhow::ensure!(script.is_file(), "{} is missing", script.display());
+    let policy: Value = serde_json::from_str(&std::fs::read_to_string(
+        root.join("API/_system/config/workspace.json"),
+    )?)?;
+    let python = std::env::var_os("FORGE_PYTHON").unwrap_or_else(|| "python".into());
+    let mut command = tokio::process::Command::new(python);
+    command
+        .arg(&script)
+        .arg("list")
+        .current_dir(root)
+        .kill_on_drop(true);
+    #[cfg(windows)]
+    command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    let output =
+        tokio::time::timeout(std::time::Duration::from_secs(30), command.output()).await??;
+    anyhow::ensure!(
+        output.status.success(),
+        "console.py failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let mut feed: Value = serde_json::from_slice(&output.stdout)?;
+    anyhow::ensure!(
+        feed["stations"].is_array(),
+        "console returned no station array"
+    );
+    feed["workspace"] = policy;
+    Ok(feed)
+}
+
+async fn pack_workbench() -> axum::response::Html<&'static str> {
+    axum::response::Html(include_str!("../../../ui/workbench.html"))
 }
 
 #[derive(Deserialize)]
@@ -642,6 +695,34 @@ mod tests {
         )
         .await;
         assert_eq!(gen["provider"], "mock");
+    }
+
+    #[tokio::test]
+    async fn missing_pipeline_is_an_explicit_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let error = read_station_feed(dir.path()).await.unwrap_err();
+        assert!(error.to_string().contains("console.py"));
+    }
+
+    #[tokio::test]
+    async fn station_feed_uses_console_output_and_shared_policy() {
+        let dir = tempfile::tempdir().unwrap();
+        let system = dir.path().join("API/_system");
+        std::fs::create_dir_all(system.join("engine")).unwrap();
+        std::fs::create_dir_all(system.join("config")).unwrap();
+        std::fs::write(
+            system.join("engine/console.py"),
+            "import json\nprint(json.dumps({'stations': [{'label': '41_STORY'}]}))",
+        )
+        .unwrap();
+        std::fs::write(
+            system.join("config/workspace.json"),
+            r#"{"EXCLUDED_FROM_PAGE":[],"groups":[["","Front stations"]]}"#,
+        )
+        .unwrap();
+        let feed = read_station_feed(dir.path()).await.unwrap();
+        assert_eq!(feed["stations"][0]["label"], "41_STORY");
+        assert_eq!(feed["workspace"]["groups"][0][1], "Front stations");
     }
 
     #[tokio::test]
