@@ -12,6 +12,11 @@ Verified on this Windows checkout:
 - Actual-catalog JavaScript render test: 69 registered / 68 visible; Stories,
   Kait Stories, FIS and filtering passed. Home and workspace scripts parsed.
 - HTML Assembly accepts a dry run without creating output.
+- Release build and local installation into `station/BACKSIDE` passed. Installed
+  `forge.exe` matches the release binary by SHA-256. The installed server returns
+  HTTP 200 for `/`, `/workspace`, `/workbench`, and `/health`; `/api/stations`
+  reports 69 registered / 68 visible, both story stations, 3 FIS stations and zero
+  source errors. No desktop/startup shortcuts were created by this local install.
 
 The broad legacy Python suite was not green. Before merging FIS it reported
 5 failures and 1 error in 29 tests. Integration fixes address the newly surfaced
