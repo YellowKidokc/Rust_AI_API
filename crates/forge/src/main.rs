@@ -3,6 +3,7 @@
 //!   forge mcp              MCP server on stdio, for other AIs
 //!   forge run / ask / ...  the command line
 
+mod apis;
 mod mcp;
 mod server;
 
@@ -798,6 +799,20 @@ fn init(dir: PathBuf) -> Result<()> {
             .map(|(n, t)| (dir.join("templates").join(format!("{n}.md")), *t)),
     )
     .collect();
+    let files = files.into_iter().chain([
+        (
+            dir.join("ui/home.html"),
+            include_str!("../../../ui/home.html"),
+        ),
+        (
+            dir.join("ui/api-workspace.html"),
+            include_str!("../../../ui/api-workspace.html"),
+        ),
+        (
+            dir.join("ui/workbench.html"),
+            include_str!("../../../ui/workbench.html"),
+        ),
+    ]);
     for (path, text) in files {
         if path.exists() {
             println!("kept     {}", path.display());
